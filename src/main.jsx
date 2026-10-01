@@ -1,293 +1,2253 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { Download, FileDown, ImagePlus, Layers, Minus, Paintbrush, Plus, RotateCcw, Sparkles, Trash2, Upload } from 'lucide-react';
-import './styles.css';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createRoot } from "react-dom/client";
+import {
+  ArrowDownToLine,
+  ArrowRight,
+  Check,
+  CheckCheck,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CircleHelp,
+  Copy,
+  CreditCard,
+  Expand,
+  ExternalLink,
+  FileUp,
+  FlipHorizontal2,
+  FolderOpen,
+  Image as ImageIcon,
+  Layers3,
+  LoaderCircle,
+  Minus,
+  Plus,
+  Printer,
+  Redo2,
+  RotateCcw,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  Type,
+  Undo2,
+  Upload,
+  X,
+} from "lucide-react";
+import "@fontsource-variable/noto-sans-tc";
+import "./styles.css";
+import {
+  BACK_COLORS,
+  BACK_PATTERNS,
+  FRONT_MODES,
+  MAX_CARDS,
+  RANKS,
+  SUITS,
+  TEMPLATES,
+  applyFrontPatch,
+  cardLabel,
+  clamp,
+  createProject,
+  effectiveFront,
+  makeCustomCards,
+  makeDeck,
+  normalizeProject,
+} from "./model.js";
+import { BackArtwork, PlayingCard } from "./cards.jsx";
+import { buildPrintPlan, PAPERS } from "./print-layout.js";
+import { PrintOutput, PrintPage } from "./print.jsx";
+import { downloadProject, loadProject, saveProject } from "./storage.js";
+import { readImage } from "./images.js";
+import { useProjectHistory } from "./use-history.js";
 
-const CARD_SIZE = { w: 63, h: 88, label: '啤牌 / Poker 63×88mm' };
-
-const templates = {
-  poker52: { label: '標準啤牌 52 隻', count: 52, desc: '4 種花色 × A 至 K，可作普通啤牌遊玩。' },
-  poker54: { label: '啤牌 54 隻', count: 54, desc: '52 隻標準啤牌 + 大小皇。' },
-  uno108: { label: 'UNO 類型 108 隻', count: 108, desc: '顏色、數字、功能牌，可改成旅團任務版。' },
-  custom: { label: '自訂數量', count: 12, desc: '給特別活動、章別訓練、任務卡使用。' },
-};
-
-const printSizes = {
-  a4: { label: 'A4 家用打印', page: 'A4 portrait', w: 210, h: 297, desc: 'A4 排多張啤牌，可顯示剪裁虛線。' },
-  r3: { label: '3R 相片 89×127mm', page: '89mm 127mm', w: 89, h: 127, desc: '一張 3R 放一張 63×88mm 啤牌，最接近相片沖印做法。' },
-  r4: { label: '4R 相片 102×152mm', page: '102mm 152mm', w: 102, h: 152, desc: '一張 4R 放一張 63×88mm 啤牌，邊位較多，適合高質輸出。' },
-};
-
-const a4Choices = [1, 2, 4, 6, 8, 9, 12, 13, 16, 18, 25, 36, 52];
-
-const backPatterns = [
-  { id: 'scout', label: 'Scout 指南星' },
-  { id: 'cloud', label: '雲紋' },
-  { id: 'compass', label: '指南針' },
-  { id: 'chevron', label: '童軍箭紋' },
-  { id: 'plain', label: '淨色' },
-  { id: 'custom', label: '自訂上傳圖案' },
+const IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/svg+xml";
+const STEPS = [
+  {
+    id: "deck",
+    label: "牌組",
+    heading: "先選一副牌",
+    subtitle: "經典啤牌，或者自己的玩法。",
+    icon: Layers3,
+  },
+  {
+    id: "front",
+    label: "牌面",
+    heading: "加一點你的心思",
+    subtitle: "純牌、Logo、圖片或文字，直接選。",
+    icon: CreditCard,
+  },
+  {
+    id: "back",
+    label: "牌背",
+    heading: "選一款好看的牌背",
+    subtitle: "對稱花紋，全副牌共用。",
+    icon: FlipHorizontal2,
+  },
+  {
+    id: "print",
+    label: "輸出",
+    heading: "準備好，雙面列印",
+    subtitle: "正反面已配對，不用自己排版。",
+    icon: Printer,
+  },
+];
+const REFERENCES = [
+  [
+    "純牌",
+    "https://drive.google.com/drive/folders/1DjUC8vcdp3zcDM8DPFakj2EpTEzqebVV",
+  ],
+  [
+    "純牌（有邊）",
+    "https://drive.google.com/drive/folders/1ikyxnceJAzfp9jNJTNryi_fv8l3xEeNc",
+  ],
+  [
+    "四色牌背",
+    "https://drive.google.com/drive/folders/1S892CHsqif4foTjGgGW4VJaS-Y3VF7FF",
+  ],
+  [
+    "氣象組 LOGO",
+    "https://drive.google.com/file/d/1NCUQlHqDfICXlEqWzl7Kbg44H91EfmYb/view",
+  ],
 ];
 
-const frontPatterns = [
-  { id: 'classic', label: '經典啤牌角標' },
-  { id: 'clouds', label: '雲 / 氣象' },
-  { id: 'forest', label: '森林' },
-  { id: 'stars', label: '星空' },
-  { id: 'knots', label: '繩結' },
-  { id: 'custom', label: '自訂上傳圖案' },
-  { id: 'blank', label: '留白' },
-];
-
-const imageSlots = {
-  none: { label: '不放圖案', help: '只有文字和花色。' },
-  logoTL: { label: '左上 LOGO', help: '系統自動用 LOGO 尺寸，放在安全邊距內。' },
-  logoTR: { label: '右上 LOGO', help: '系統自動用 LOGO 尺寸，放在安全邊距內。' },
-  logoBL: { label: '左下 LOGO', help: '適合旅團章或活動章。' },
-  logoBR: { label: '右下 LOGO', help: '適合旅團章或活動章。' },
-  iconCenter: { label: '中間圖案', help: '中等尺寸，適合雲種、技能或章別圖示。' },
-  heroCenter: { label: '中間大圖', help: '大圖尺寸，適合相片或主視覺。' },
-  watermark: { label: '淡水印', help: '自動放大、降低透明度，作背景紋理。' },
-};
-
-const textLayouts = {
-  standard: { label: '標準：標題 + 大字 + 說明' },
-  playing: { label: '啤牌：只顯示大字 / 點數' },
-  caption: { label: '圖片卡：文字放底部' },
-  none: { label: '不放文字' },
-};
-
-const suitData = [
-  { suit: '♠', name: 'Spade', color: 'black' },
-  { suit: '♥', name: 'Heart', color: 'red' },
-  { suit: '♦', name: 'Diamond', color: 'red' },
-  { suit: '♣', name: 'Club', color: 'black' },
-];
-const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-
-function pokerCards(includeJokers = false) {
-  const cards = suitData.flatMap(s => ranks.map(rank => makeCard(`${rank}${s.suit}`, rank, s.suit, s.name, s.color)));
-  if (includeJokers) {
-    cards.push(makeCard('JK', 'JOKER', '大皇', 'Joker', 'red', '★'));
-    cards.push(makeCard('JK', 'JOKER', '小皇', 'Joker', 'black', '☆'));
-  }
-  return cards;
+function radioKeys(event) {
+  if (
+    ![
+      "ArrowLeft",
+      "ArrowRight",
+      "ArrowUp",
+      "ArrowDown",
+      "Home",
+      "End",
+    ].includes(event.key)
+  )
+    return;
+  const options = Array.from(
+    event.currentTarget.querySelectorAll('button[role="radio"]'),
+  );
+  const current = options.indexOf(document.activeElement);
+  if (current < 0 || !options.length) return;
+  event.preventDefault();
+  const index =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? options.length - 1
+        : (current +
+            (["ArrowRight", "ArrowDown"].includes(event.key) ? 1 : -1) +
+            options.length) %
+          options.length;
+  options[index].focus();
+  options[index].click();
 }
 
-function unoCards() {
-  const colors = [['紅', '#dc2626'], ['黃', '#ca8a04'], ['綠', '#16a34a'], ['藍', '#2563eb']];
-  const action = ['Skip', 'Reverse', '+2'];
-  const cards = [];
-  colors.forEach(([name, color]) => {
-    cards.push(makeCard(`${name} 0`, '0', name, name, color));
-    for (let i = 1; i <= 9; i++) { cards.push(makeCard(`${name} ${i}`, String(i), name, name, color)); cards.push(makeCard(`${name} ${i}`, String(i), name, name, color)); }
-    action.forEach(a => { cards.push(makeCard(`${name} ${a}`, a, name, name, color)); cards.push(makeCard(`${name} ${a}`, a, name, name, color)); });
-  });
-  for (let i = 0; i < 4; i++) { cards.push(makeCard('Wild', 'WILD', '萬用牌', '萬用', '#111827')); cards.push(makeCard('+4', '+4', '萬用牌', '萬用', '#111827')); }
-  return cards;
+function IconButton({ label, children, className = "", ...props }) {
+  return (
+    <button
+      type="button"
+      className={`icon-button ${className}`}
+      aria-label={label}
+      title={label}
+      {...props}
+    >
+      {children}
+    </button>
+  );
 }
-
-function customCards(count = 12) { return Array.from({ length: count }, (_, i) => makeCard(String(i + 1).padStart(2, '0'), `卡牌 ${i + 1}`, '自訂用途', '任務卡', 'black')); }
-function makeCard(number, centerText, note, title = '卡牌', playColor = 'black', playSuit = '') { return { id: crypto.randomUUID(), number, title, centerText, note, playSuit, playColor, art: '' }; }
+function Field({ label, hint, children, className = "" }) {
+  const id = React.useId();
+  const controlId = children.props.id || id;
+  return (
+    <div className={`field ${className}`}>
+      <label className="field-label" htmlFor={controlId}>
+        {label}
+      </label>
+      {React.cloneElement(children, {
+        id: controlId,
+        "aria-describedby": hint ? `${id}-hint` : undefined,
+      })}
+      {hint && (
+        <span id={`${id}-hint`} className="field-hint">
+          {hint}
+        </span>
+      )}
+    </div>
+  );
+}
+function Toggle({ label, checked, onChange, hint }) {
+  return (
+    <label className="toggle-field">
+      <input
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>
+        <strong>{label}</strong>
+        {hint && <small>{hint}</small>}
+      </span>
+    </label>
+  );
+}
+function Segmented({ label, options, value, onChange, className = "" }) {
+  return (
+    <div className={`segmented ${className}`} role="group" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          aria-pressed={value === option.id}
+          className={value === option.id ? "selected" : ""}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+function UploadZone({
+  label,
+  hint,
+  value,
+  onUpload,
+  onRemove,
+  busy,
+  target,
+  multiple = false,
+}) {
+  const input = useRef(null);
+  const [dragging, setDragging] = useState(false);
+  const id = React.useId();
+  return (
+    <div
+      className={`upload-zone ${dragging ? "dragging" : ""} ${value ? "has-image" : ""}`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        if (!busy) setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(event) => {
+        event.preventDefault();
+        setDragging(false);
+        if (!busy && event.dataTransfer.files.length)
+          onUpload(Array.from(event.dataTransfer.files));
+      }}
+    >
+      <label
+        htmlFor={id}
+        className="upload-trigger"
+        tabIndex={busy ? -1 : 0}
+        role="button"
+        aria-label={label}
+        aria-disabled={busy}
+        onKeyDown={(event) => {
+          if (!busy && ["Enter", " "].includes(event.key)) {
+            event.preventDefault();
+            input.current?.click();
+          }
+        }}
+      >
+        {value ? (
+          <img src={value} className="upload-thumbnail" alt="已上傳的圖片" />
+        ) : (
+          <span className="upload-icon">
+            <Upload size={21} strokeWidth={1.7} />
+          </span>
+        )}
+        <span className="upload-copy">
+          <strong>{busy ? "正在處理圖片…" : value ? "更換圖片" : label}</strong>
+          <small>
+            {value ? "已加入 · 按一下更換" : hint || "拖放圖片，或按一下上傳"}
+          </small>
+        </span>
+        <input
+          ref={input}
+          id={id}
+          hidden
+          type="file"
+          accept={IMAGE_ACCEPT}
+          multiple={multiple}
+          data-upload={target}
+          disabled={busy}
+          onChange={(event) => {
+            const files = Array.from(event.target.files || []);
+            event.target.value = "";
+            if (files.length) onUpload(files);
+          }}
+        />
+      </label>
+      {value && onRemove && (
+        <IconButton
+          className="upload-remove"
+          label="移除圖片"
+          onClick={onRemove}
+        >
+          <X size={15} />
+        </IconButton>
+      )}
+    </div>
+  );
+}
+function ReferenceLinks() {
+  return (
+    <details className="reference-links">
+      <summary>
+        <FolderOpen size={16} />
+        <span>使用你的參考素材</span>
+        <ChevronDown size={15} />
+      </summary>
+      <div className="reference-content">
+        <p>Drive 內的純牌、牌背與 Logo，下載後可直接上傳。</p>
+        <div>
+          {REFERENCES.map(([label, url]) => (
+            <a key={label} href={url} target="_blank" rel="noreferrer">
+              {label}
+              <ExternalLink size={12} />
+            </a>
+          ))}
+        </div>
+      </div>
+    </details>
+  );
+}
+function Brand() {
+  return (
+    <div className="brand">
+      <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" />
+      <span>
+        <strong>
+          啤牌工房<span className="brand-dot">.</span>
+        </strong>
+        <small>CARD STUDIO</small>
+      </span>
+    </div>
+  );
+}
 
 function App() {
-  const [cards, setCards] = useState(() => load('cards', pokerCards(false)));
-  const [activeId, setActiveId] = useState(cards[0]?.id);
-  const [deckName, setDeckName] = useState(() => localStorage.getItem('deckName') || 'Scout Playing Cards');
-  const [copyright, setCopyright] = useState(() => localStorage.getItem('copyright') || 'COPY RIGHT Scout System');
-  const [template, setTemplate] = useState(() => localStorage.getItem('template') || 'poker52');
-  const [customCount, setCustomCount] = useState(() => Number(localStorage.getItem('customCount')) || 12);
-  const [printSize, setPrintSize] = useState(() => localStorage.getItem('printSize') || 'r3');
-  const [a4PerSheet, setA4PerSheet] = useState(() => Number(localStorage.getItem('a4PerSheet')) || 9);
-  const [backPattern, setBackPattern] = useState(() => localStorage.getItem('backPattern') || 'scout');
-  const [frontPattern, setFrontPattern] = useState(() => localStorage.getItem('frontPattern') || 'classic');
-  const [backColor, setBackColor] = useState(() => localStorage.getItem('backColor') || '#0f766e');
-  const [frontColor, setFrontColor] = useState(() => localStorage.getItem('frontColor') || '#1e3a8a');
-  const [printSide, setPrintSide] = useState(() => localStorage.getItem('printSide') || 'front');
-  const [backUpload, setBackUpload] = useState(() => localStorage.getItem('backUpload') || '');
-  const [frontUpload, setFrontUpload] = useState(() => localStorage.getItem('frontUpload') || '');
-  const [imageSlot, setImageSlot] = useState(() => localStorage.getItem('imageSlot') || 'iconCenter');
-  const [imageStep, setImageStep] = useState(() => Number(localStorage.getItem('imageStep')) || 0);
-  const [textLayout, setTextLayout] = useState(() => localStorage.getItem('textLayout') || 'standard');
-  const [textStep, setTextStep] = useState(() => Number(localStorage.getItem('textStep')) || 0);
+  const { project, change, replace, undo, redo, canUndo, canRedo } =
+    useProjectHistory(createProject);
+  const [ready, setReady] = useState(false);
+  const [tab, setTab] = useState("deck");
+  const [view, setView] = useState("cards");
+  const [activeId, setActiveId] = useState(null);
+  const [scope, setScope] = useState("deck");
+  const [customCount, setCustomCount] = useState(12);
+  const [suitFilter, setSuitFilter] = useState("all");
+  const [sheetIndex, setSheetIndex] = useState(0);
+  const [zoom, setZoom] = useState(100);
+  const [storageStatus, setStorageStatus] = useState("saving");
+  const [notice, setNotice] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [firstSheetOnly, setFirstSheetOnly] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const stageRef = useRef(null);
+  const deckRef = useRef(null);
+  const autoFit = useRef(true);
+  const [stageSize, setStageSize] = useState({ width: 800, height: 450 });
 
-  const activeCard = cards.find(c => c.id === activeId) || cards[0];
-  const output = printSizes[printSize];
-  const a4 = makeA4Layout(a4PerSheet);
-  const a4Card = calcA4CardSize(a4);
-  const settings = { deckName, copyright, output, backPattern, frontPattern, backColor, frontColor, backUpload, frontUpload, imageSlot, imageStep, textLayout, textStep };
+  const { settings, cards } = project;
+  const activeCard = cards.find((card) => card.id === activeId) || cards[0];
+  const activeIndex = cards.findIndex((card) => card.id === activeCard.id);
+  const front =
+    scope === "deck" ? settings.front : effectiveFront(activeCard, settings);
+  const filteredCards = useMemo(
+    () =>
+      cards.filter(
+        (card) =>
+          suitFilter === "all" ||
+          (suitFilter === "joker"
+            ? card.kind === "joker"
+            : card.suit === suitFilter),
+      ),
+    [cards, suitFilter],
+  );
+  const plan = useMemo(
+    () => buildPrintPlan(cards, settings.print),
+    [cards, settings.print],
+  );
+  const step = STEPS.find((item) => item.id === tab);
+  const currentSheet = Math.min(sheetIndex, plan.sheets - 1);
+  const notify = useCallback(
+    (message, tone = "success") => setNotice({ message, tone }),
+    [],
+  );
 
   useEffect(() => {
-    Object.entries({ deckName, copyright, template, customCount, printSize, a4PerSheet, backPattern, frontPattern, backColor, frontColor, printSide, backUpload, frontUpload, imageSlot, imageStep, textLayout, textStep }).forEach(([k, v]) => localStorage.setItem(k, String(v)));
-    localStorage.setItem('cards', JSON.stringify(cards));
-  }, [cards, deckName, copyright, template, customCount, printSize, a4PerSheet, backPattern, frontPattern, backColor, frontColor, printSide, backUpload, frontUpload, imageSlot, imageStep, textLayout, textStep]);
+    let cancelled = false;
+    loadProject().then((saved) => {
+      if (cancelled) return;
+      replace(saved);
+      setActiveId(saved.cards[0].id);
+      setCustomCount(saved.template === "custom" ? saved.cards.length : 12);
+      setReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [replace]);
 
-  const applyTemplate = (nextTemplate) => {
-    setTemplate(nextTemplate);
-    const build = () => nextTemplate === 'poker52' ? pokerCards(false) : nextTemplate === 'poker54' ? pokerCards(true) : nextTemplate === 'uno108' ? unoCards() : customCards(customCount);
-    if (window.confirm(`套用「${templates[nextTemplate].label}」會重新建立卡牌。是否繼續？`)) { const next = build(); setCards(next); setActiveId(next[0].id); }
-  };
-  const rebuildCustom = () => { const count = Math.max(1, Math.min(160, Number(customCount) || 1)); if (window.confirm(`重新建立 ${count} 張自訂卡？`)) { const next = customCards(count); setCards(next); setActiveId(next[0].id); setTemplate('custom'); } };
-  const updateCard = (patch) => setCards(list => list.map(card => card.id === activeCard.id ? { ...card, ...patch } : card));
-  const addCard = () => { const card = makeCard(String(cards.length + 1).padStart(2, '0'), `卡牌 ${cards.length + 1}`, '自訂加牌'); setCards([...cards, card]); setActiveId(card.id); };
-  const removeCard = () => { if (cards.length <= 1) return; const next = cards.filter(card => card.id !== activeCard.id); setCards(next); setActiveId(next[0].id); };
-  const uploadImage = (event, target) => {
-    const file = event.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => { if (target === 'card') updateCard({ art: reader.result }); if (target === 'back') { setBackUpload(reader.result); setBackPattern('custom'); } if (target === 'front') { setFrontUpload(reader.result); setFrontPattern('custom'); } };
-    reader.readAsDataURL(file);
-  };
-  const exportJson = () => {
-    const data = { deckName, copyright, template, customCount, printSize, a4PerSheet, backPattern, frontPattern, backColor, frontColor, printSide, backUpload, frontUpload, imageSlot, imageStep, textLayout, textStep, cards };
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    const a = document.createElement('a'); a.href = url; a.download = `${deckName}-card-design.json`; a.click(); URL.revokeObjectURL(url);
-  };
-  const importJson = (event) => {
-    const file = event.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => { try { const data = JSON.parse(reader.result); setDeckName(data.deckName || deckName); setCopyright(data.copyright || copyright); setTemplate(data.template || 'poker52'); setCustomCount(data.customCount || 12); setPrintSize(data.printSize || 'r3'); setA4PerSheet(Number(data.a4PerSheet || data.a4Count || 9)); setBackPattern(data.backPattern || 'scout'); setFrontPattern(data.frontPattern || 'classic'); setBackColor(data.backColor || '#0f766e'); setFrontColor(data.frontColor || '#1e3a8a'); setPrintSide(data.printSide || 'front'); setBackUpload(data.backUpload || ''); setFrontUpload(data.frontUpload || ''); setImageSlot(data.imageSlot || 'iconCenter'); setImageStep(data.imageStep || 0); setTextLayout(data.textLayout || 'standard'); setTextStep(data.textStep || 0); const imported = (data.cards || []).map(card => ({ ...makeCard('01', '卡牌', '自訂'), ...card, id: card.id || crypto.randomUUID() })); if (imported.length) { setCards(imported); setActiveId(imported[0].id); } } catch { alert('匯入失敗：請選擇正確 JSON 檔。'); } };
-    reader.readAsText(file);
-  };
-  const resetDesign = () => { setBackPattern('scout'); setFrontPattern('classic'); setBackColor('#0f766e'); setFrontColor('#1e3a8a'); setImageSlot('iconCenter'); setImageStep(0); setTextLayout('standard'); setTextStep(0); setBackUpload(''); setFrontUpload(''); };
-  const pageStyle = useMemo(() => {
-    const page = printSize === 'a4' ? a4.page : output.page;
-    const margin = printSize === 'a4' ? '8mm' : '0';
-    const pageW = printSize === 'a4' ? (a4.page.includes('landscape') ? 281 : 194) : output.w;
-    const pageH = printSize === 'a4' ? (a4.page.includes('landscape') ? 194 : 281) : output.h;
-    return `@page{size:${page};margin:${margin};} @media print{.print-sheet{--page-w:${pageW}mm;--page-h:${pageH}mm;--a4-cols:${a4.cols};--a4-gap:${a4.gap}mm;--a4-card-w:${a4Card.w}mm;--a4-card-h:${a4Card.h}mm;}}`;
-  }, [output, printSize, a4, a4Card]);
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    setStorageStatus("saving");
+    const timer = setTimeout(
+      () =>
+        saveProject(project)
+          .then(() => {
+            if (!cancelled) setStorageStatus("saved");
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setStorageStatus("error");
+              notify("瀏覽器未能自動儲存，請按「儲存設計」下載備份。", "error");
+            }
+          }),
+      450,
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [project, ready, notify]);
 
-  return <>
-    <style>{pageStyle}</style>
-    <header className="hero">
-      <nav><div className="brand"><img src="/icon.svg" alt="icon"/> Scout Card Studio</div><div className="nav-actions"><button onClick={exportJson}><Download size={16}/>儲存設計</button><label className="button ghost"><Upload size={16}/>載入設計<input hidden type="file" accept="application/json" onChange={importJson}/></label><button className="primary" onClick={() => window.print()}><FileDown size={16}/>列印 / 存成 PDF</button></div></nav>
-      <section className="hero-copy compact-title"><p className="eyebrow">COPY RIGHT Scout System</p><h1>啤牌 Canvas</h1><p>選牌組 → 選花色 → 加圖文 → 輸出 PDF</p></section>
-    </header>
+  useEffect(() => {
+    if (!ready) return;
+    const flush = () => {
+      saveProject(project).catch(() => {});
+    };
+    const hidden = () => {
+      if (document.hidden) flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", hidden);
+    };
+  }, [project, ready]);
 
-    <main className="workspace">
-      <section className="panel flow rail">
-        <div className="rail-brand"><Layers size={18}/><span>流程</span></div>
-        <button className="rail-step active">① 牌組</button>
-        <button className="rail-step">② 花色</button>
-        <button className="rail-step">③ 圖文</button>
-        <button className="rail-step">④ PDF</button>
-        <details className="tutorial"><summary>教學</summary><ol><li><strong>固定卡尺寸</strong><span>{CARD_SIZE.label}，適合 3R / 4R 相片紙。</span></li><li><strong>選卡牌數量</strong><span>52、54、UNO 或自訂張數。</span></li><li><strong>選牌底 / 牌面花色</strong><span>可用預設，亦可上傳圖案。</span></li><li><strong>選圖案位置</strong><span>例如左上 LOGO、中間圖案、中間大圖，系統自動縮放。</span></li><li><strong>需要才按 + / -</strong><span>只做輕微放大縮小，不需要手動對位。</span></li></ol></details>
-        <div className="mini-copy">{copyright}</div>
-      </section>
-
-      <section className="panel controls"><div className="panel-title"><Paintbrush size={18}/>設定</div><div className="form-grid two">
-        <label>卡組名稱<input value={deckName} onChange={e => setDeckName(e.target.value)} /></label>
-        <label>版權字句<input value={copyright} onChange={e => setCopyright(e.target.value)} /></label>
-        <label>牌組<select value={template} onChange={e => applyTemplate(e.target.value)}>{Object.entries(templates).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select><span className="field-pill">{cards.length} 張</span></label>
-        <label>自訂張數<input type="number" min="1" max="160" value={customCount} onChange={e => setCustomCount(e.target.value)} onBlur={rebuildCustom}/></label>
-        <label>輸出<select value={printSize} onChange={e => setPrintSize(e.target.value)}>{Object.entries(printSizes).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></label>
-        {printSize === 'a4' && <label>A4 每張紙幾隻<input list="a4-counts" type="number" min="1" max="80" value={a4PerSheet} onChange={e => setA4PerSheet(Number(e.target.value))} onBlur={() => setA4PerSheet(Math.max(1, Math.min(80, Number(a4PerSheet) || 1)))}/><datalist id="a4-counts">{a4Choices.map(n => <option key={n} value={n}>{n} 隻</option>)}</datalist><span className="field-pill">{a4.page.includes('landscape') ? '橫向' : '直向'}｜{a4.cols}×{a4.rows}｜約 {a4Card.w}×{a4Card.h}mm｜剪裁虛線</span></label>}
-        <label>列印哪一面<select value={printSide} onChange={e => setPrintSide(e.target.value)}><option value="front">牌面</option><option value="back">牌底</option><option value="both">牌面 + 牌底</option></select></label>
-        <label>牌底花色<select value={backPattern} onChange={e => setBackPattern(e.target.value)}>{backPatterns.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
-        <label>牌底主色<input type="color" value={backColor} onChange={e => setBackColor(e.target.value)} /></label>
-        <label>上傳牌底圖案<input type="file" accept="image/*" onChange={e => uploadImage(e, 'back')} /></label>
-        <label>牌面花色<select value={frontPattern} onChange={e => setFrontPattern(e.target.value)}>{frontPatterns.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
-        <label>牌面主色<input type="color" value={frontColor} onChange={e => setFrontColor(e.target.value)} /></label>
-        <label>上傳牌面花色圖案<input type="file" accept="image/*" onChange={e => uploadImage(e, 'front')} /></label>
-      </div><div className="toolbar"><button onClick={resetDesign}><RotateCcw size={16}/>重設花色</button></div></section>
-
-      <section className="preview-zone"><div className="preview-header"><Sparkles size={18}/>預覽</div><div className="preview-pair"><CardPreview side="back" card={activeCard} settings={settings}/><CardPreview side="front" card={activeCard} settings={settings}/></div><p className="hint compact-hint">位置和大小已自動處理。A4 輸出會加剪裁虛線。</p></section>
-
-      <section className="panel card-content"><div className="panel-title"><ImagePlus size={18}/>內容</div><div className="card-tabs">{cards.slice(0, 80).map(card => <button key={card.id} className={card.id === activeCard.id ? 'active' : ''} onClick={() => setActiveId(card.id)}>{card.number}</button>)}{cards.length > 80 && <span className="more">+{cards.length - 80}</span>}<button onClick={addCard}><Plus size={15}/>加牌</button></div>
-        <div className="form-grid two">
-          <label>角標 / 卡號<input value={activeCard.number} onChange={e => updateCard({ number: e.target.value })}/></label>
-          <label>牌面小標題<input value={activeCard.title} onChange={e => updateCard({ title: e.target.value })}/></label>
-          <label className="span-2">中間大文字<input value={activeCard.centerText} onChange={e => updateCard({ centerText: e.target.value })}/></label>
-          <label className="span-2">補充文字<textarea value={activeCard.note} onChange={e => updateCard({ note: e.target.value })}/></label>
-          <label>圖案位置<select value={imageSlot} onChange={e => setImageSlot(e.target.value)}>{Object.entries(imageSlots).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></label>
-          <label>文字排法<select value={textLayout} onChange={e => setTextLayout(e.target.value)}>{Object.entries(textLayouts).map(([id, item]) => <option key={id} value={id}>{item.label}</option>)}</select></label>
-        </div>
-        <div className="simple-adjust"><div><strong>圖案大小</strong><button onClick={() => setImageStep(Math.max(-2, imageStep - 1))}><Minus size={15}/></button><span>{imageStep === 0 ? '標準' : imageStep > 0 ? `+${imageStep}` : imageStep}</span><button onClick={() => setImageStep(Math.min(2, imageStep + 1))}><Plus size={15}/></button></div><div><strong>文字大小</strong><button onClick={() => setTextStep(Math.max(-2, textStep - 1))}><Minus size={15}/></button><span>{textStep === 0 ? '標準' : textStep > 0 ? `+${textStep}` : textStep}</span><button onClick={() => setTextStep(Math.min(2, textStep + 1))}><Plus size={15}/></button></div></div>
-        <div className="toolbar"><label className="button"><ImagePlus size={16}/>上傳中間圖案<input hidden type="file" accept="image/*" onChange={e => uploadImage(e, 'card')}/></label><button onClick={() => updateCard({ art: '' })}>移除圖案</button><button className="danger" onClick={removeCard}><Trash2 size={16}/>刪除卡</button></div>
-      </section>
-    </main>
-
-    <PrintOutput cards={cards} settings={settings} printSize={printSize} printSide={printSide} a4PerSheet={a4PerSheet} a4={a4} />
-  </>;
-}
-
-
-function PrintOutput({ cards, settings, printSize, printSide, a4PerSheet, a4 }) {
-  const items = [];
-  if (printSide === 'front' || printSide === 'both') cards.forEach(card => items.push({ side: 'front', card, key: `f-${card.id}` }));
-  if (printSide === 'back' || printSide === 'both') cards.forEach(card => items.push({ side: 'back', card, key: `b-${card.id}` }));
-  if (printSize !== 'a4') {
-    return <section className={`print-sheet print-${printSize} side-${printSide}`}>{items.map(item => <CardPreview key={item.key} side={item.side} card={item.card} settings={settings}/>)}</section>;
-  }
-  const pages = chunk(items, a4.count);
-  return <section className={`print-sheet print-a4 a4-${a4PerSheet} side-${printSide}`}>{pages.map((page, index) => <div className="print-page" key={index}>{page.map(item => <CardPreview key={item.key} side={item.side} card={item.card} settings={settings}/>)}</div>)}</section>;
-}
-
-
-function makeA4Layout(count) {
-  const safeCount = Math.max(1, Math.min(80, Number(count) || 1));
-  const gap = safeCount <= 4 ? 8 : safeCount <= 9 ? 4 : safeCount <= 18 ? 3 : safeCount <= 36 ? 2 : 1;
-  let best = null;
-  for (const page of ['A4 portrait', 'A4 landscape']) {
-    const landscape = page.includes('landscape');
-    const pageW = landscape ? 281 : 194;
-    const pageH = landscape ? 194 : 281;
-    for (let cols = 1; cols <= safeCount; cols++) {
-      const rows = Math.ceil(safeCount / cols);
-      const size = sizeForGrid(pageW, pageH, cols, rows, gap);
-      const score = size.w * size.h;
-      const waste = cols * rows - safeCount;
-      if (!best || score > best.score || (Math.abs(score - best.score) < 0.01 && waste < best.waste)) {
-        best = { count: safeCount, cols, rows, page, gap, score, waste };
+  useEffect(() => {
+    document.title = `${settings.deckName}｜啤牌工房`;
+  }, [settings.deckName]);
+  useEffect(() => {
+    if (!cards.some((card) => card.id === activeId)) setActiveId(cards[0].id);
+    if (suitFilter !== "all" && !filteredCards.length) setSuitFilter("all");
+  }, [cards, activeId, suitFilter, filteredCards.length]);
+  useEffect(() => {
+    if (!notice || notice.tone === "error") return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => {
+    const handler = (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        downloadProject(project);
+        notify("設計檔已下載，隨時可以再載入。");
       }
+      if (
+        event.target instanceof HTMLElement &&
+        (event.target.matches("input, textarea, select") ||
+          event.target.isContentEditable)
+      )
+        return;
+      if (event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        event.shiftKey ? redo() : undo();
+      }
+      if (event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [project, undo, redo, notify]);
+  useEffect(() => {
+    const handler = () => {
+      setPrinting(false);
+      setFirstSheetOnly(false);
+    };
+    window.addEventListener("afterprint", handler);
+    return () => window.removeEventListener("afterprint", handler);
+  }, []);
+  useEffect(() => {
+    if (!ready || !stageRef.current) return;
+    const observer = new ResizeObserver(([entry]) =>
+      setStageSize({
+        width: entry.contentRect.width,
+        height: entry.contentRect.height,
+      }),
+    );
+    observer.observe(stageRef.current);
+    return () => observer.disconnect();
+  }, [ready]);
+
+  const fitZoom = useCallback(() => {
+    const width = view === "cards" ? 238 : 260;
+    const height = view === "cards" ? 333 : 368;
+    const pair = stageRef.current?.querySelector(
+      view === "cards" ? ".card-pair" : ".sheet-pair",
+    );
+    const gap = pair ? parseFloat(getComputedStyle(pair).gap) || 36 : 36;
+    // ResizeObserver gives the content box (padding is already excluded).
+    return Math.round(
+      clamp(
+        Math.min(
+          (stageSize.width - gap) / (width * 2),
+          (stageSize.height - 57) / height,
+        ) * 100,
+        45,
+        125,
+        100,
+      ),
+    );
+  }, [view, stageSize]);
+  useEffect(() => {
+    if (autoFit.current) setZoom(fitZoom());
+  }, [fitZoom]);
+  useEffect(() => {
+    const selected = deckRef.current?.querySelector(`[data-active="true"]`);
+    if (selected) {
+      const list = deckRef.current;
+      if (list.contains(document.activeElement))
+        selected.focus({ preventScroll: true });
+      const left = selected.offsetLeft - list.offsetLeft;
+      if (
+        left < list.scrollLeft ||
+        left + selected.offsetWidth > list.scrollLeft + list.clientWidth
+      )
+        list.scrollTo({
+          left: Math.max(
+            0,
+            left - list.clientWidth / 2 + selected.offsetWidth / 2,
+          ),
+          behavior: "smooth",
+        });
     }
-  }
-  return best;
+  }, [activeId, suitFilter]);
+
+  const patchSettings = (patch) =>
+    change((current) => ({
+      ...current,
+      settings: { ...current.settings, ...patch },
+    }));
+  const patchBack = (patch) =>
+    change((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        back: { ...current.settings.back, ...patch },
+      },
+    }));
+  const patchPrint = (patch) =>
+    change((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        print: { ...current.settings.print, ...patch },
+      },
+    }));
+  const patchFront = (patch) =>
+    change((current) => applyFrontPatch(current, patch, scope, activeCard.id));
+  const patchCard = (patch) =>
+    change((current) => ({
+      ...current,
+      cards: current.cards.map((card) =>
+        card.id === activeCard.id ? { ...card, ...patch } : card,
+      ),
+    }));
+  const chooseView = (next) => {
+    autoFit.current = true;
+    setView(next);
+  };
+  const chooseTab = (next) => {
+    setTab(next);
+    chooseView(next === "print" ? "sheets" : "cards");
+    if (window.innerWidth <= 780)
+      requestAnimationFrame(() =>
+        document
+          .querySelector(".inspector")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      );
+  };
+
+  const applyTemplate = (nextTemplate, count = customCount) => {
+    const modified = cards.some((card) => Object.keys(card.front).length > 0);
+    if (
+      modified &&
+      !window.confirm(
+        "更換牌組會重新建立卡牌及清除逐張內容。共用 Logo、圖片及牌背設定會保留。是否繼續？",
+      )
+    )
+      return;
+    const next = makeDeck(nextTemplate, count);
+    change((current) => ({ ...current, template: nextTemplate, cards: next }));
+    setActiveId(next[0].id);
+    setSuitFilter("all");
+    setSheetIndex(0);
+    if (nextTemplate === "custom") setCustomCount(next.length);
+  };
+  const addCard = () => {
+    if (cards.length >= MAX_CARDS) {
+      notify("每副牌最多 160 張。", "error");
+      return;
+    }
+    const card = makeCustomCards(1)[0];
+    card.number = String(cards.length + 1).padStart(2, "0");
+    card.front.title = `卡牌 ${cards.length + 1}`;
+    change((current) => ({ ...current, cards: [...current.cards, card] }));
+    setActiveId(card.id);
+    setSuitFilter("all");
+    setScope("card");
+    chooseTab("front");
+    chooseView("cards");
+  };
+  const duplicateCard = () => {
+    if (cards.length >= MAX_CARDS) {
+      notify("每副牌最多 160 張。", "error");
+      return;
+    }
+    const copy = {
+      ...activeCard,
+      id: crypto.randomUUID(),
+      front: { ...activeCard.front },
+    };
+    change((current) => {
+      const next = [...current.cards];
+      next.splice(activeIndex + 1, 0, copy);
+      return { ...current, cards: next };
+    });
+    setActiveId(copy.id);
+    notify(`已複製 ${cardLabel(activeCard)}。`);
+  };
+  const removeCard = () => {
+    if (
+      cards.length <= 1 ||
+      !window.confirm(`刪除 ${cardLabel(activeCard)}？可以用「復原」還原。`)
+    )
+      return;
+    const next = cards.filter((card) => card.id !== activeCard.id);
+    change((current) => ({ ...current, cards: next }));
+    setActiveId(next[Math.min(activeIndex, next.length - 1)].id);
+  };
+  const navigateCard = (direction) => {
+    const list = filteredCards.length ? filteredCards : cards;
+    const index = list.findIndex((card) => card.id === activeCard.id);
+    setActiveId(list[(index + direction + list.length) % list.length].id);
+  };
+
+  const uploadImages = async (files, target) => {
+    if (busy) return;
+    const targetCardId = activeCard.id;
+    const targetScope = scope;
+    const startIndex = activeIndex;
+    const allowed =
+      target === "front" && targetScope === "card"
+        ? cards.length - startIndex
+        : 1;
+    const selected = files.slice(0, allowed);
+    setBusy(true);
+    try {
+      const images = [];
+      for (const file of selected) images.push(await readImage(file));
+      change((current) => {
+        if (target === "logo")
+          return {
+            ...current,
+            settings: { ...current.settings, logo: images[0] },
+          };
+        if (target === "back")
+          return {
+            ...current,
+            settings: {
+              ...current.settings,
+              back: {
+                ...current.settings.back,
+                art: images[0],
+                pattern: "upload",
+              },
+            },
+          };
+        if (targetScope === "deck")
+          return applyFrontPatch(
+            current,
+            { art: images[0], mode: "image" },
+            "deck",
+            targetCardId,
+          );
+        // Resolve by IDs captured at upload time so selecting another card while
+        // an image decodes cannot attach that image to the wrong card.
+        const ids = cards
+          .slice(startIndex, startIndex + images.length)
+          .map((card) => card.id);
+        return {
+          ...current,
+          cards: current.cards.map((card) => {
+            const index = ids.indexOf(card.id);
+            return index < 0
+              ? card
+              : {
+                  ...card,
+                  front: { ...card.front, mode: "image", art: images[index] },
+                };
+          }),
+        };
+      });
+      notify(
+        images.length > 1
+          ? `已順序加入 ${images.length} 張圖片${files.length > allowed ? "，超出牌組的圖片未加入" : ""}。`
+          : "圖片已加入。",
+      );
+    } catch (error) {
+      notify(error.message || "未能加入圖片，請重試。", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const importDesign = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      if (file.size > 256 * 1024 * 1024)
+        throw new Error("設計檔上限為 256 MB。");
+      const saved = normalizeProject(JSON.parse(await file.text()), {
+        requireCards: true,
+      });
+      if (
+        !window.confirm(
+          "載入設計會取代目前的牌組。建議先儲存設計備份。是否繼續？",
+        )
+      )
+        return;
+      change(saved);
+      setActiveId(saved.cards[0].id);
+      setSuitFilter("all");
+      setSheetIndex(0);
+      setCustomCount(saved.template === "custom" ? saved.cards.length : 12);
+      notify("設計已載入。");
+    } catch (error) {
+      notify(
+        error instanceof SyntaxError
+          ? "檔案格式不正確，請選擇卡牌設計 JSON。"
+          : error.message,
+        "error",
+      );
+    }
+  };
+  const preparePrint = async (firstOnly) => {
+    if (busy || printing) return;
+    setPrinting(true);
+    setFirstSheetOnly(firstOnly);
+    try {
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      await document.fonts.ready;
+      const images = Array.from(document.querySelectorAll(".print-output img"));
+      await Promise.all(images.map((image) => image.decode()));
+      window.print();
+    } catch {
+      setPrinting(false);
+      setFirstSheetOnly(false);
+      notify("部分圖片未能載入，暫未開啟列印。請稍後再試。", "error");
+    }
+  };
+
+  if (!ready)
+    return (
+      <div className="loading-screen">
+        <Brand />
+        <LoaderCircle className="spin" size={24} />
+        <p>正在載入你的牌組…</p>
+      </div>
+    );
+
+  return (
+    <>
+      <style>{`@page { size: ${plan.layout.width}mm ${plan.layout.height}mm; margin: 0; }`}</style>
+      <div className="app-shell">
+        <header className="app-header">
+          <Brand />
+          <div className={`save-status ${storageStatus}`}>
+            <span className="status-dot" />
+            {storageStatus === "saved"
+              ? "已儲存在此瀏覽器"
+              : storageStatus === "error"
+                ? "請下載備份"
+                : "儲存中…"}
+          </div>
+          <div className="header-actions">
+            <label className="button quiet load-design">
+              <FileUp size={17} />
+              <span>載入設計</span>
+              <input
+                hidden
+                type="file"
+                accept="application/json,.json"
+                data-testid="import-design"
+                disabled={busy || printing}
+                onChange={importDesign}
+              />
+            </label>
+            <button
+              className="button quiet"
+              onClick={() => {
+                downloadProject(project);
+                notify("設計檔已下載，隨時可以再載入。");
+              }}
+            >
+              <ArrowDownToLine size={17} />
+              <span>儲存設計</span>
+            </button>
+            <span className="header-divider" />
+            <button
+              className="button primary"
+              onClick={() => chooseTab("print")}
+            >
+              <Printer size={17} />
+              <span>列印 / PDF</span>
+              <ArrowRight size={15} />
+            </button>
+          </div>
+        </header>
+
+        <main className="workspace">
+          <nav className="tool-rail" aria-label="製作步驟">
+            <div className="rail-tools">
+              {STEPS.map((item, index) => (
+                <button
+                  key={item.id}
+                  className={`rail-tool ${tab === item.id ? "active" : ""}`}
+                  aria-current={tab === item.id ? "step" : undefined}
+                  aria-label={item.label}
+                  onClick={() => chooseTab(item.id)}
+                >
+                  <span className="rail-icon">
+                    <item.icon size={21} strokeWidth={1.7} />
+                  </span>
+                  <span>{item.label}</span>
+                  <small>0{index + 1}</small>
+                </button>
+              ))}
+            </div>
+            <IconButton label="快速使用說明" onClick={() => setHelpOpen(true)}>
+              <CircleHelp size={21} strokeWidth={1.6} />
+            </IconButton>
+          </nav>
+
+          <aside className="inspector" aria-labelledby="inspector-title">
+            <div className="inspector-heading">
+              <div className="step-eyebrow">
+                STEP 0{STEPS.findIndex((item) => item.id === tab) + 1}
+                <span> / 04</span>
+              </div>
+              <h1 id="inspector-title">{step.heading}</h1>
+              <p>{step.subtitle}</p>
+            </div>
+            <fieldset
+              className="inspector-body"
+              disabled={busy || printing}
+              aria-busy={busy}
+            >
+              {tab === "deck" && (
+                <>
+                  <Field label="牌組名稱">
+                    <input
+                      value={settings.deckName}
+                      maxLength={80}
+                      placeholder="我的啤牌"
+                      onChange={(event) =>
+                        patchSettings({ deckName: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <div className="section-label">
+                    選擇牌組<span>{cards.length} 張</span>
+                  </div>
+                  <div
+                    className="template-grid"
+                    role="radiogroup"
+                    aria-label="選擇牌組"
+                    onKeyDown={radioKeys}
+                  >
+                    {Object.entries(TEMPLATES).map(([id, item]) => (
+                      <button
+                        key={id}
+                        className={`template-choice ${project.template === id ? "selected" : ""}`}
+                        role="radio"
+                        tabIndex={project.template === id ? 0 : -1}
+                        aria-checked={project.template === id}
+                        onClick={() => {
+                          if (id !== project.template) applyTemplate(id);
+                        }}
+                      >
+                        <span className="template-symbol">
+                          {id === "poker52" ? (
+                            "♠"
+                          ) : id === "poker54" ? (
+                            "♛"
+                          ) : id === "uno108" ? (
+                            <span className="uno-dots">
+                              <i />
+                              <i />
+                              <i />
+                              <i />
+                            </span>
+                          ) : (
+                            <Layers3 size={21} />
+                          )}
+                        </span>
+                        <strong>{item.label}</strong>
+                        <small>{item.detail}</small>
+                        {project.template === id && (
+                          <Check size={14} className="choice-check" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {project.template === "custom" && (
+                    <div className="custom-count-row">
+                      <Field label="自訂張數">
+                        <input
+                          aria-label="自訂張數"
+                          type="number"
+                          min="1"
+                          max={MAX_CARDS}
+                          value={customCount}
+                          onChange={(event) =>
+                            setCustomCount(event.target.value)
+                          }
+                        />
+                      </Field>
+                      <button
+                        className="button secondary"
+                        onClick={() => {
+                          const number = Number(customCount);
+                          if (
+                            !Number.isInteger(number) ||
+                            number < 1 ||
+                            number > MAX_CARDS
+                          ) {
+                            notify("請輸入 1–160 之間的整數。", "error");
+                            return;
+                          }
+                          applyTemplate("custom", number);
+                        }}
+                      >
+                        建立牌組
+                      </button>
+                    </div>
+                  )}
+                  <div className="info-note">
+                    <ShieldCheck size={18} />
+                    <div>
+                      <strong>真正的啤牌尺寸</strong>
+                      <p>
+                        固定 63 × 88 mm。A4 排版不縮小，剪裁後就是正常啤牌。
+                      </p>
+                    </div>
+                  </div>
+                  <div className="next-step-card">
+                    <div>
+                      <small>下一步，讓它有你的風格</small>
+                      <strong>純牌也好，加圖文也好。</strong>
+                    </div>
+                    <button
+                      className="button secondary"
+                      onClick={() => chooseTab("front")}
+                    >
+                      設計牌面
+                      <ArrowRight size={16} />
+                    </button>
+                  </div>
+                  <details className="advanced">
+                    <summary>
+                      牌組管理
+                      <ChevronDown size={15} />
+                    </summary>
+                    <div className="advanced-content">
+                      <p className="field-hint">
+                        所有卡牌都可以在下方選取，不限於首 80 張。
+                      </p>
+                      <button
+                        className="button secondary full-width"
+                        onClick={addCard}
+                        disabled={cards.length >= MAX_CARDS}
+                      >
+                        <Plus size={16} />
+                        加入一張自訂卡
+                      </button>
+                      <CardActions
+                        activeCard={activeCard}
+                        cards={cards}
+                        onDuplicate={duplicateCard}
+                        onRemove={removeCard}
+                      />
+                    </div>
+                  </details>
+                </>
+              )}
+
+              {tab === "front" && (
+                <>
+                  <div className="section-label">套用範圍</div>
+                  <Segmented
+                    label="牌面套用範圍"
+                    options={[
+                      { id: "deck", label: "整副牌" },
+                      { id: "card", label: `只改 ${cardLabel(activeCard)}` },
+                    ]}
+                    value={scope}
+                    onChange={setScope}
+                  />
+                  {scope === "deck" &&
+                    Object.keys(activeCard.front).length > 0 && (
+                      <div className="override-note">
+                        這張牌另有個別內容。
+                        <button onClick={() => setScope("card")}>
+                          查看這張
+                        </button>
+                      </div>
+                    )}
+                  <div className="section-label">牌面方式</div>
+                  <div
+                    className="front-mode-grid"
+                    role="radiogroup"
+                    aria-label="牌面方式"
+                    onKeyDown={radioKeys}
+                  >
+                    {FRONT_MODES.map((mode) => (
+                      <button
+                        key={mode.id}
+                        className={`front-mode ${front.mode === mode.id ? "selected" : ""}`}
+                        role="radio"
+                        tabIndex={front.mode === mode.id ? 0 : -1}
+                        aria-label={mode.label}
+                        aria-checked={front.mode === mode.id}
+                        onClick={() =>
+                          patchFront({
+                            mode: mode.id,
+                            ...(mode.id === "text"
+                              ? { showIndices: true }
+                              : mode.id === "image"
+                                ? { showIndices: false }
+                                : {}),
+                          })
+                        }
+                      >
+                        <span className={`mode-mini mini-${mode.id}`}>
+                          {mode.id === "pure" ? (
+                            <span>♠</span>
+                          ) : mode.id === "logo" ? (
+                            <>
+                              <span>♠</span>
+                              <i>LOGO</i>
+                            </>
+                          ) : mode.id === "image" ? (
+                            <ImageIcon size={21} strokeWidth={1.4} />
+                          ) : (
+                            <Type size={21} strokeWidth={1.6} />
+                          )}
+                        </span>
+                        <strong>{mode.label}</strong>
+                        {front.mode === mode.id && (
+                          <Check size={13} className="choice-check" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  {front.mode === "pure" && (
+                    <div className="info-note subtle">
+                      <CheckCheck size={19} />
+                      <div>
+                        <strong>保留一副正常啤牌</strong>
+                        <p>
+                          標準花色、正確點數、雙向角標，以及 J / Q / K
+                          人像。沒有多餘圖示或文字。
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {front.mode === "logo" && (
+                    <>
+                      <UploadZone
+                        label="上傳小 LOGO"
+                        hint="PNG、JPG 或 SVG · 支援透明底"
+                        value={settings.logo}
+                        target="logo"
+                        busy={busy}
+                        onUpload={(files) => uploadImages(files, "logo")}
+                        onRemove={() => patchSettings({ logo: "" })}
+                      />
+                      <Field
+                        label={
+                          <span className="range-label">
+                            Logo 大小<strong>{settings.logoSize} mm</strong>
+                          </span>
+                        }
+                        hint="小標記，不會取代啤牌主體。"
+                      >
+                        <input
+                          type="range"
+                          min="5"
+                          max="16"
+                          step="1"
+                          value={settings.logoSize}
+                          onChange={(event) =>
+                            patchSettings({
+                              logoSize: Number(event.target.value),
+                            })
+                          }
+                          aria-label="Logo 大小"
+                        />
+                      </Field>
+                      <Field label="Logo 位置">
+                        <select
+                          value={settings.logoPosition}
+                          onChange={(event) =>
+                            patchSettings({ logoPosition: event.target.value })
+                          }
+                        >
+                          <option value="bottom-center">下方中央</option>
+                          <option value="top-right">右上方</option>
+                          <option value="bottom-left">左下方</option>
+                        </select>
+                      </Field>
+                      <p className="field-hint">
+                        Logo 圖片與大小全副共用；套用範圍決定哪些牌面顯示它。
+                      </p>
+                    </>
+                  )}
+                  {front.mode === "image" && (
+                    <>
+                      <UploadZone
+                        label="上傳完整牌面"
+                        hint={
+                          scope === "card"
+                            ? "可多選圖片，從這張牌起順序加入"
+                            : "相片、插畫，或已有角標的整張牌"
+                        }
+                        value={front.art}
+                        target="front"
+                        multiple={scope === "card"}
+                        busy={busy}
+                        onUpload={(files) => uploadImages(files, "front")}
+                        onRemove={() => patchFront({ art: "" })}
+                      />
+                      <div className="section-label small-label">圖片顯示</div>
+                      <Segmented
+                        label="牌面圖片顯示"
+                        options={[
+                          { id: "cover", label: "填滿 · 裁切" },
+                          { id: "contain", label: "完整顯示" },
+                        ]}
+                        value={front.fit}
+                        onChange={(fit) => patchFront({ fit })}
+                      />
+                      <Toggle
+                        label="保留白邊"
+                        checked={front.frame === "white"}
+                        onChange={(checked) =>
+                          patchFront({ frame: checked ? "white" : "full" })
+                        }
+                      />
+                      <Toggle
+                        label="加上啤牌角標"
+                        checked={front.showIndices}
+                        onChange={(showIndices) => patchFront({ showIndices })}
+                        hint="圖片已有角標時，保持關閉。"
+                      />
+                    </>
+                  )}
+                  {front.mode === "text" && (
+                    <>
+                      <Field label="標題">
+                        <input
+                          value={front.title}
+                          maxLength={80}
+                          placeholder="例如：積雲 / 今日任務"
+                          onChange={(event) =>
+                            patchFront({ title: event.target.value })
+                          }
+                        />
+                      </Field>
+                      <Field
+                        label="內容"
+                        hint="自動置中及縮放；建議 150 字以內。"
+                      >
+                        <textarea
+                          value={front.body}
+                          maxLength={600}
+                          rows={4}
+                          placeholder="把想說的話，放進這張牌。"
+                          onChange={(event) =>
+                            patchFront({ body: event.target.value })
+                          }
+                        />
+                      </Field>
+                      <Field label="底部小字（可留空）">
+                        <input
+                          value={front.footer}
+                          maxLength={80}
+                          placeholder="例如：氣象組 / 活動名稱"
+                          onChange={(event) =>
+                            patchFront({ footer: event.target.value })
+                          }
+                        />
+                      </Field>
+                      <Toggle
+                        label="保留啤牌角標"
+                        checked={front.showIndices}
+                        onChange={(showIndices) => patchFront({ showIndices })}
+                      />
+                    </>
+                  )}
+                  <details className="advanced">
+                    <summary>
+                      這張牌與其他設定
+                      <ChevronDown size={15} />
+                    </summary>
+                    <div className="advanced-content">
+                      {activeCard.kind === "poker" ? (
+                        <div className="field-pair">
+                          <Field label="點數">
+                            <select
+                              value={activeCard.rank}
+                              onChange={(event) =>
+                                patchCard({
+                                  rank: event.target.value,
+                                  number: `${event.target.value}${SUITS.find((suit) => suit.id === activeCard.suit).symbol}`,
+                                })
+                              }
+                            >
+                              {RANKS.map((rank) => (
+                                <option key={rank}>{rank}</option>
+                              ))}
+                            </select>
+                          </Field>
+                          <Field label="花色">
+                            <select
+                              value={activeCard.suit}
+                              onChange={(event) =>
+                                patchCard({
+                                  suit: event.target.value,
+                                  number: `${activeCard.rank}${SUITS.find((suit) => suit.id === event.target.value).symbol}`,
+                                })
+                              }
+                            >
+                              {SUITS.map((suit) => (
+                                <option value={suit.id} key={suit.id}>
+                                  {suit.symbol} {suit.label}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
+                      ) : (
+                        <Field label="卡號">
+                          <input
+                            value={activeCard.number}
+                            maxLength={30}
+                            onChange={(event) =>
+                              patchCard({ number: event.target.value })
+                            }
+                          />
+                        </Field>
+                      )}
+                      <Field label="全副版權小字（可留空）">
+                        <input
+                          value={settings.copyright}
+                          maxLength={100}
+                          placeholder="不填就不顯示"
+                          onChange={(event) =>
+                            patchSettings({ copyright: event.target.value })
+                          }
+                        />
+                      </Field>
+                      {Object.keys(activeCard.front).length > 0 && (
+                        <button
+                          className="button quiet full-width"
+                          onClick={() => {
+                            patchCard({ front: {} });
+                            notify("這張牌已回復全副設定。");
+                          }}
+                        >
+                          <RotateCcw size={15} />
+                          這張牌回復全副設定
+                        </button>
+                      )}
+                      <CardActions
+                        activeCard={activeCard}
+                        cards={cards}
+                        onDuplicate={duplicateCard}
+                        onRemove={removeCard}
+                      />
+                      <button
+                        className="button quiet full-width"
+                        onClick={addCard}
+                        disabled={cards.length >= MAX_CARDS}
+                      >
+                        <Plus size={15} />
+                        加入一張自訂卡
+                      </button>
+                    </div>
+                  </details>
+                </>
+              )}
+
+              {tab === "back" && (
+                <>
+                  <div className="section-label">
+                    經典牌背<span>180° 對稱</span>
+                  </div>
+                  <div
+                    className="back-pattern-grid"
+                    role="radiogroup"
+                    aria-label="牌背花紋"
+                    onKeyDown={radioKeys}
+                  >
+                    {BACK_PATTERNS.map((pattern) => (
+                      <button
+                        className={`back-pattern ${settings.back.pattern === pattern.id ? "selected" : ""}`}
+                        role="radio"
+                        tabIndex={
+                          settings.back.pattern === pattern.id ||
+                          (settings.back.pattern === "upload" &&
+                            pattern.id === "classic")
+                            ? 0
+                            : -1
+                        }
+                        aria-checked={settings.back.pattern === pattern.id}
+                        key={pattern.id}
+                        onClick={() => patchBack({ pattern: pattern.id })}
+                      >
+                        <span className="back-sample">
+                          <BackArtwork
+                            pattern={pattern.id}
+                            color={settings.back.color}
+                          />
+                        </span>
+                        <strong>{pattern.label}</strong>
+                        {settings.back.pattern === pattern.id && (
+                          <Check size={13} className="choice-check" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="section-label">牌背顏色</div>
+                  <div className="color-swatches">
+                    {BACK_COLORS.map((color, index) => (
+                      <button
+                        key={color}
+                        className={`color-swatch ${settings.back.color === color ? "selected" : ""}`}
+                        style={{ "--swatch-color": color }}
+                        aria-label={`${["綠", "藍", "紅", "黑"][index]}色牌背`}
+                        aria-pressed={settings.back.color === color}
+                        onClick={() => patchBack({ color })}
+                      >
+                        {settings.back.color === color && <Check size={16} />}
+                      </button>
+                    ))}
+                    <label className="custom-color" title="自訂牌背顏色">
+                      <span>＋</span>
+                      <input
+                        aria-label="自訂牌背顏色"
+                        type="color"
+                        value={settings.back.color}
+                        onChange={(event) =>
+                          patchBack({ color: event.target.value })
+                        }
+                      />
+                    </label>
+                    <span className="color-value">
+                      {settings.back.color.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="section-divider">
+                    <span>或者，用自己的圖案</span>
+                  </div>
+                  <UploadZone
+                    label="上傳完整牌背"
+                    hint="可用 Drive 內的牌底圖案"
+                    value={
+                      settings.back.pattern === "upload"
+                        ? settings.back.art
+                        : ""
+                    }
+                    target="back"
+                    busy={busy}
+                    onUpload={(files) => uploadImages(files, "back")}
+                    onRemove={() => patchBack({ art: "", pattern: "classic" })}
+                  />
+                  {settings.back.art && settings.back.pattern !== "upload" && (
+                    <button
+                      className="button quiet full-width"
+                      onClick={() => patchBack({ pattern: "upload" })}
+                    >
+                      <ImageIcon size={15} />
+                      使用之前上傳的牌背
+                    </button>
+                  )}
+                  {settings.back.pattern === "upload" && (
+                    <>
+                      <Segmented
+                        label="牌背圖片顯示"
+                        options={[
+                          { id: "cover", label: "填滿 · 裁切" },
+                          { id: "contain", label: "完整顯示" },
+                        ]}
+                        value={settings.back.fit}
+                        onChange={(fit) => patchBack({ fit })}
+                      />
+                      <Toggle
+                        label="保留牌背白邊"
+                        checked={settings.back.frame === "white"}
+                        onChange={(checked) =>
+                          patchBack({ frame: checked ? "white" : "full" })
+                        }
+                      />
+                    </>
+                  )}
+                  <div className="info-note subtle">
+                    <Layers3 size={18} />
+                    <div>
+                      <strong>全副共用同一牌背</strong>
+                      <p>
+                        預設只有花紋及白邊，不會放大 Logo，也不會印上牌組名稱。
+                      </p>
+                    </div>
+                  </div>
+                  <details className="advanced">
+                    <summary>
+                      加入小 Logo 或文字
+                      <ChevronDown size={15} />
+                    </summary>
+                    <div className="advanced-content">
+                      <Toggle
+                        label="牌背加入小 Logo"
+                        checked={settings.back.showLogo}
+                        onChange={(showLogo) => patchBack({ showLogo })}
+                        hint={`共用牌面 Logo，${settings.logoSize} mm，置於中央。`}
+                      />
+                      {settings.back.showLogo && (
+                        <UploadZone
+                          label="上傳牌背 LOGO"
+                          hint="與牌面共用同一張 Logo"
+                          value={settings.logo}
+                          target="logo"
+                          busy={busy}
+                          onUpload={(files) => uploadImages(files, "logo")}
+                          onRemove={() => patchSettings({ logo: "" })}
+                        />
+                      )}
+                      <Field
+                        label="牌背文字（可留空）"
+                        hint="文字會成對、反向顯示，保持雙向設計。"
+                      >
+                        <input
+                          value={settings.back.text}
+                          maxLength={60}
+                          placeholder="例如：氣象組"
+                          onChange={(event) =>
+                            patchBack({ text: event.target.value })
+                          }
+                        />
+                      </Field>
+                    </div>
+                  </details>
+                </>
+              )}
+
+              {tab === "print" && (
+                <>
+                  <div className="duplex-banner">
+                    <span className="duplex-icon">
+                      <FlipHorizontal2 size={21} />
+                    </span>
+                    <div>
+                      <strong>正反配對，雙面輸出</strong>
+                      <p>正 1 → 反 1 → 正 2 → 反 2…</p>
+                    </div>
+                    <CheckCheck size={18} />
+                  </div>
+                  <Field label="紙張">
+                    <select
+                      value={settings.print.paper}
+                      onChange={(event) => {
+                        patchPrint({ paper: event.target.value });
+                        setSheetIndex(0);
+                      }}
+                    >
+                      {Object.entries(PAPERS).map(([id, paper]) => (
+                        <option key={id} value={id}>
+                          {paper.label}
+                          {id === "a4"
+                            ? " · 210 × 297 mm"
+                            : ` · ${paper.width} × ${paper.height} mm`}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  {settings.print.paper === "a4" && (
+                    <>
+                      <div className="section-label">每張紙放幾張牌</div>
+                      <Segmented
+                        label="A4 每張紙卡牌數量"
+                        options={[
+                          { id: 9, label: "9 張 · 3 × 3" },
+                          { id: 6, label: "6 張 · 2 × 3" },
+                        ]}
+                        value={settings.print.perSheet}
+                        onChange={(perSheet) => {
+                          patchPrint({ perSheet });
+                          setSheetIndex(0);
+                        }}
+                      />
+                      <p className="field-hint">
+                        兩款排法都保持 63 × 88 mm，不會縮放卡牌。
+                      </p>
+                    </>
+                  )}
+                  <div className="section-label">雙面翻頁方式</div>
+                  <Segmented
+                    label="雙面翻頁方式"
+                    options={[
+                      { id: "long", label: "長邊翻頁" },
+                      { id: "short", label: "短邊翻頁" },
+                    ]}
+                    value={settings.print.flip}
+                    onChange={(flip) => patchPrint({ flip })}
+                  />
+                  <p className="field-hint">
+                    {settings.print.flip === "long"
+                      ? "建議選長邊。牌背位置已左右對位，不會鏡像圖片。"
+                      : "上下對位，牌背自動轉 180°，保持成品方向一致。"}
+                  </p>
+                  {settings.print.paper === "a4" && (
+                    <Toggle
+                      label="加入裁切標記"
+                      checked={settings.print.cutMarks}
+                      onChange={(cutMarks) => patchPrint({ cutMarks })}
+                      hint="只在正面加裁切線，背面不加多餘線條。"
+                    />
+                  )}
+                  <div className="output-summary">
+                    <div>
+                      <strong>
+                        {plan.sheets}
+                        <small>
+                          {" "}
+                          張
+                          {settings.print.paper === "a4" ? " A4 紙" : "相片紙"}
+                        </small>
+                      </strong>
+                      <span>雙面成品 · {cards.length} 張牌</span>
+                    </div>
+                    <div>
+                      <strong>
+                        {plan.pages.length}
+                        <small> 頁 PDF</small>
+                      </strong>
+                      <span>每張紙 1 正面 + 1 反面</span>
+                    </div>
+                  </div>
+                  <div className="print-instructions">
+                    <strong>
+                      <Printer size={16} />
+                      列印視窗請這樣選
+                    </strong>
+                    <ol>
+                      <li>
+                        <span>1</span>
+                        <p>
+                          <b>
+                            雙面列印 ·{" "}
+                            {settings.print.flip === "long" ? "長邊" : "短邊"}
+                            翻頁
+                          </b>
+                          須與上面的翻頁設定相同
+                        </p>
+                      </li>
+                      <li>
+                        <span>2</span>
+                        <p>
+                          <b>原尺寸 / 100%</b>不要用「符合頁面」或縮放
+                        </p>
+                      </li>
+                      <li>
+                        <span>3</span>
+                        <p>
+                          <b>開啟背景圖形，關閉頁首頁尾</b>
+                          確保牌背花紋及顏色完整輸出
+                        </p>
+                      </li>
+                    </ol>
+                  </div>
+                  <details className="advanced">
+                    <summary>
+                      對位微調 / 手動雙面
+                      <ChevronDown size={15} />
+                    </summary>
+                    <div className="advanced-content">
+                      <p className="field-hint">
+                        先試印，再按打印機偏差微調牌背；牌面位置不變。
+                      </p>
+                      <div className="field-pair">
+                        <Field label="牌背左右（mm）">
+                          <input
+                            type="number"
+                            min="-3"
+                            max="3"
+                            step="0.1"
+                            value={settings.print.offsetX}
+                            onChange={(event) =>
+                              patchPrint({
+                                offsetX: clamp(event.target.value, -3, 3, 0),
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="牌背上下（mm）">
+                          <input
+                            type="number"
+                            min="-3"
+                            max="3"
+                            step="0.1"
+                            value={settings.print.offsetY}
+                            onChange={(event) =>
+                              patchPrint({
+                                offsetY: clamp(event.target.value, -3, 3, 0),
+                              })
+                            }
+                          />
+                        </Field>
+                      </div>
+                      <p className="field-hint">
+                        正數向右／向下；負數向左／向上。
+                      </p>
+                      <button
+                        className="button quiet full-width"
+                        onClick={() => patchPrint({ offsetX: 0, offsetY: 0 })}
+                      >
+                        <RotateCcw size={15} />
+                        重設對位
+                      </button>
+                      <div className="manual-help">
+                        <strong>沒有自動雙面打印機？</strong>
+                        <p>
+                          先列印 PDF
+                          奇數頁（正面），再按機款入紙方向重放，列印偶數頁（反面）。部分機款需要逆序，請先試印一張確認。
+                        </p>
+                      </div>
+                    </div>
+                  </details>
+                </>
+              )}
+            </fieldset>
+            {tab === "print" && (
+              <div className="inspector-print-actions">
+                <button
+                  className="button primary full-width print-main"
+                  disabled={busy || printing}
+                  onClick={() => preparePrint(false)}
+                >
+                  {printing ? (
+                    <LoaderCircle size={17} className="spin" />
+                  ) : (
+                    <Printer size={17} />
+                  )}
+                  {printing ? "列印視窗已開啟…" : "列印 / 存成 PDF"}
+                  {!printing && <ArrowRight size={16} />}
+                </button>
+                <button
+                  className="button quiet full-width test-print"
+                  disabled={busy || printing}
+                  onClick={() => preparePrint(true)}
+                >
+                  先試印第 1 張紙（正＋反）
+                </button>
+                {printing && (
+                  <button
+                    className="text-button full-width"
+                    onClick={() => {
+                      setPrinting(false);
+                      setFirstSheetOnly(false);
+                    }}
+                  >
+                    列印視窗已關閉？返回編輯
+                  </button>
+                )}
+              </div>
+            )}
+            <div className="inspector-footer">
+              <ReferenceLinks />
+            </div>
+          </aside>
+
+          <section className="studio" aria-label="卡牌預覽及牌組">
+            <div className="studio-heading">
+              <div>
+                <div className="studio-eyebrow">MAKE IT YOURS</div>
+                <h2>
+                  <span className="deck-name-title" title={settings.deckName}>
+                    {settings.deckName || "我的啤牌"}
+                  </span>
+                  <span className="deck-count-badge">{cards.length} 張</span>
+                </h2>
+              </div>
+              <div className="history-actions">
+                <IconButton
+                  label="復原"
+                  disabled={!canUndo || busy}
+                  onClick={undo}
+                >
+                  <Undo2 size={18} />
+                </IconButton>
+                <IconButton
+                  label="重做"
+                  disabled={!canRedo || busy}
+                  onClick={redo}
+                >
+                  <Redo2 size={18} />
+                </IconButton>
+              </div>
+            </div>
+            <section className="canvas-panel">
+              <div className="canvas-toolbar">
+                <Segmented
+                  className="view-toggle"
+                  label="預覽模式"
+                  options={[
+                    {
+                      id: "cards",
+                      label: (
+                        <>
+                          <CreditCard size={15} />
+                          卡牌預覽
+                        </>
+                      ),
+                    },
+                    {
+                      id: "sheets",
+                      label: (
+                        <>
+                          <Layers3 size={15} />
+                          雙面排版
+                        </>
+                      ),
+                    },
+                  ]}
+                  value={view}
+                  onChange={chooseView}
+                />
+                <div className="canvas-live">
+                  <span />
+                  即時預覽
+                </div>
+                <div className="zoom-controls">
+                  <IconButton
+                    label="縮小預覽"
+                    disabled={zoom <= 45}
+                    onClick={() => {
+                      autoFit.current = false;
+                      setZoom((value) => Math.max(45, value - 10));
+                    }}
+                  >
+                    <Minus size={15} />
+                  </IconButton>
+                  <button
+                    className="zoom-value"
+                    title="回復 100%"
+                    onClick={() => {
+                      autoFit.current = false;
+                      setZoom(100);
+                    }}
+                  >
+                    {zoom}%
+                  </button>
+                  <IconButton
+                    label="放大預覽"
+                    disabled={zoom >= 150}
+                    onClick={() => {
+                      autoFit.current = false;
+                      setZoom((value) => Math.min(150, value + 10));
+                    }}
+                  >
+                    <Plus size={15} />
+                  </IconButton>
+                  <span />
+                  <IconButton
+                    label="符合預覽視窗"
+                    onClick={() => {
+                      autoFit.current = true;
+                      setZoom(fitZoom());
+                    }}
+                  >
+                    <Expand size={16} />
+                  </IconButton>
+                </div>
+              </div>
+              <div
+                className={`canvas-stage ${view === "sheets" ? "sheet-stage" : ""}`}
+                ref={stageRef}
+              >
+                {view === "cards" ? (
+                  <div
+                    className="card-pair"
+                    style={{
+                      "--card-width": `${(238 * zoom) / 100}px`,
+                      "--card-height": `${(((238 * zoom) / 100) * 88) / 63}px`,
+                    }}
+                  >
+                    <div className="preview-card-item">
+                      <div className="preview-label">
+                        <span className="face-label-dot" />
+                        <strong>牌面</strong>
+                        <span>{cardLabel(activeCard)}</span>
+                      </div>
+                      <button
+                        className={`preview-card-button ${tab === "front" ? "editing" : ""}`}
+                        aria-label="編輯牌面"
+                        onClick={() => chooseTab("front")}
+                      >
+                        <PlayingCard card={activeCard} settings={settings} />
+                      </button>
+                      <span className="card-size-label">63 × 88 mm</span>
+                    </div>
+                    <div className="preview-card-item">
+                      <div className="preview-label">
+                        <span className="back-label-dot" />
+                        <strong>牌背</strong>
+                        <span>全副共用</span>
+                      </div>
+                      <button
+                        className={`preview-card-button ${tab === "back" ? "editing" : ""}`}
+                        aria-label="編輯牌背"
+                        onClick={() => chooseTab("back")}
+                      >
+                        <PlayingCard
+                          card={activeCard}
+                          side="back"
+                          settings={settings}
+                        />
+                      </button>
+                      <span className="card-size-label">
+                        {settings.back.pattern === "upload"
+                          ? "自訂牌背 · 全副共用"
+                          : settings.back.showLogo
+                            ? "花紋牌背 · 小 Logo"
+                            : "對稱牌背 · 雙向設計"}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className="sheet-pair"
+                    style={{
+                      "--preview-paper-width": `${(260 * zoom) / 100}px`,
+                    }}
+                  >
+                    {plan.pages
+                      .slice(currentSheet * 2, currentSheet * 2 + 2)
+                      .map((page) => (
+                        <div className="sheet-preview-item" key={page.side}>
+                          <div className="preview-label">
+                            <span
+                              className={
+                                page.side === "front"
+                                  ? "face-label-dot"
+                                  : "back-label-dot"
+                              }
+                            />
+                            <strong>
+                              {page.side === "front" ? "正面" : "反面"}
+                            </strong>
+                            <span>
+                              PDF 第{" "}
+                              {currentSheet * 2 +
+                                (page.side === "front" ? 1 : 2)}{" "}
+                              頁
+                            </span>
+                          </div>
+                          <PrintPage
+                            page={page}
+                            layout={plan.layout}
+                            settings={settings}
+                            sheets={plan.sheets}
+                            preview
+                          />
+                          <span className="card-size-label">
+                            {page.side === "front"
+                              ? `${plan.layout.label} · 第 ${page.sheet} 張紙`
+                              : `${settings.print.flip === "long" ? "左右" : "上下"}對位${page.rotation ? " · 牌背轉 180°" : " · 圖案不鏡像"}`}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+                <div className="canvas-bottom-note">
+                  {view === "cards" ? (
+                    <>
+                      <ShieldCheck size={14} />
+                      <span>標準尺寸</span>
+                      <i />
+                      <span>正反面一目了然</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCheck size={14} />
+                      <span>正反頁已配對</span>
+                      <i />
+                      <span>最後一頁保留空格對位</span>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="canvas-statusbar">
+                {view === "cards" ? (
+                  <>
+                    <div className="card-navigation">
+                      <IconButton
+                        label="上一張牌"
+                        onClick={() => navigateCard(-1)}
+                      >
+                        <ChevronLeft size={16} />
+                      </IconButton>
+                      <span>
+                        <strong>{cardLabel(activeCard)}</strong>
+                        <small>
+                          第 {activeIndex + 1} / {cards.length} 張
+                        </small>
+                      </span>
+                      <IconButton
+                        label="下一張牌"
+                        onClick={() => navigateCard(1)}
+                      >
+                        <ChevronRight size={16} />
+                      </IconButton>
+                    </div>
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setScope("card");
+                        chooseTab("front");
+                      }}
+                    >
+                      編輯這張牌
+                      <ArrowRight size={14} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="card-navigation">
+                      <IconButton
+                        label="上一張紙"
+                        disabled={currentSheet === 0}
+                        onClick={() => setSheetIndex(currentSheet - 1)}
+                      >
+                        <ChevronLeft size={16} />
+                      </IconButton>
+                      <span>
+                        <strong>
+                          第 {currentSheet + 1} / {plan.sheets} 張紙
+                        </strong>
+                        <small>
+                          共 {plan.pages.length} 頁 · 每張 1 正 + 1 反
+                        </small>
+                      </span>
+                      <IconButton
+                        label="下一張紙"
+                        disabled={currentSheet === plan.sheets - 1}
+                        onClick={() => setSheetIndex(currentSheet + 1)}
+                      >
+                        <ChevronRight size={16} />
+                      </IconButton>
+                    </div>
+                    <button
+                      className="text-button"
+                      onClick={() => chooseTab("print")}
+                    >
+                      列印設定
+                      <ArrowRight size={14} />
+                    </button>
+                  </>
+                )}
+              </div>
+            </section>
+
+            <section className="deck-panel" aria-labelledby="deck-heading">
+              <div className="deck-toolbar">
+                <div className="deck-title">
+                  <Layers3 size={16} />
+                  <h3 id="deck-heading">你的牌組</h3>
+                  <span>{cards.length}</span>
+                </div>
+                <div
+                  className="suit-filters"
+                  role="group"
+                  aria-label="按花色篩選"
+                >
+                  <button
+                    className={suitFilter === "all" ? "active" : ""}
+                    aria-pressed={suitFilter === "all"}
+                    onClick={() => setSuitFilter("all")}
+                  >
+                    全部
+                  </button>
+                  {SUITS.filter((suit) =>
+                    cards.some((card) => card.suit === suit.id),
+                  ).map((suit) => (
+                    <button
+                      key={suit.id}
+                      className={suitFilter === suit.id ? "active" : ""}
+                      aria-label={suit.label}
+                      aria-pressed={suitFilter === suit.id}
+                      style={{ color: suit.color }}
+                      onClick={() => {
+                        setSuitFilter(suit.id);
+                        if (activeCard.suit !== suit.id)
+                          setActiveId(
+                            cards.find((card) => card.suit === suit.id).id,
+                          );
+                      }}
+                    >
+                      {suit.symbol}
+                    </button>
+                  ))}
+                  {cards.some((card) => card.kind === "joker") && (
+                    <button
+                      className={suitFilter === "joker" ? "active" : ""}
+                      aria-pressed={suitFilter === "joker"}
+                      onClick={() => {
+                        setSuitFilter("joker");
+                        setActiveId(
+                          cards.find((card) => card.kind === "joker").id,
+                        );
+                      }}
+                    >
+                      皇
+                    </button>
+                  )}
+                </div>
+                <div className="deck-scroll-actions">
+                  <IconButton
+                    label="向左瀏覽牌組"
+                    onClick={() =>
+                      deckRef.current?.scrollBy({
+                        left: -350,
+                        behavior: "smooth",
+                      })
+                    }
+                  >
+                    <ChevronLeft size={16} />
+                  </IconButton>
+                  <IconButton
+                    label="向右瀏覽牌組"
+                    onClick={() =>
+                      deckRef.current?.scrollBy({
+                        left: 350,
+                        behavior: "smooth",
+                      })
+                    }
+                  >
+                    <ChevronRight size={16} />
+                  </IconButton>
+                </div>
+              </div>
+              <div
+                className="deck-strip"
+                ref={deckRef}
+                role="listbox"
+                aria-label="選擇卡牌"
+                onKeyDown={(event) => {
+                  if (
+                    ["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                      event.key,
+                    )
+                  ) {
+                    event.preventDefault();
+                    if (event.key === "Home") setActiveId(filteredCards[0].id);
+                    else if (event.key === "End")
+                      setActiveId(filteredCards.at(-1).id);
+                    else navigateCard(event.key === "ArrowRight" ? 1 : -1);
+                  }
+                }}
+              >
+                {filteredCards.map((card) => (
+                  <button
+                    key={card.id}
+                    className={`deck-card ${card.id === activeCard.id ? "selected" : ""}`}
+                    role="option"
+                    aria-selected={card.id === activeCard.id}
+                    aria-label={cardLabel(card)}
+                    tabIndex={card.id === activeCard.id ? 0 : -1}
+                    data-active={card.id === activeCard.id}
+                    onClick={() => setActiveId(card.id)}
+                  >
+                    <span className="mini-card">
+                      <PlayingCard card={card} settings={settings} />
+                    </span>
+                    <span className="mini-card-label">
+                      {cardLabel(card)}
+                      {Object.keys(card.front).length > 0 && (
+                        <i title="獨立內容" />
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </section>
+            <footer className="studio-footer">
+              <span>
+                <Check size={13} />
+                {storageStatus === "error"
+                  ? "自動儲存暫不可用，請下載設計備份"
+                  : "不用登入，設計保存在你的瀏覽器"}
+              </span>
+              <button onClick={() => setHelpOpen(true)}>
+                快速使用說明
+                <ExternalLink size={12} />
+              </button>
+            </footer>
+          </section>
+        </main>
+        <footer className="app-footer" aria-label="網站版權">
+          COPY RIGHT Scout System
+        </footer>
+        {notice && (
+          <div
+            className={`toast ${notice.tone}`}
+            role={notice.tone === "error" ? "alert" : "status"}
+          >
+            {notice.tone === "error" ? (
+              <CircleHelp size={18} />
+            ) : (
+              <Check size={18} />
+            )}
+            <span>{notice.message}</span>
+            <IconButton label="關閉訊息" onClick={() => setNotice(null)}>
+              <X size={15} />
+            </IconButton>
+          </div>
+        )}
+        <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+      </div>
+      <PrintOutput
+        plan={plan}
+        settings={settings}
+        firstSheetOnly={firstSheetOnly}
+      />
+    </>
+  );
 }
 
-function sizeForGrid(pageW, pageH, cols, rows, gap) {
-  const usableW = pageW - gap * (cols - 1);
-  const usableH = pageH - gap * (rows - 1);
-  const byWidth = usableW / cols;
-  const byHeight = usableH / rows;
-  const aspect = CARD_SIZE.h / CARD_SIZE.w;
-  let w = byWidth;
-  let h = w * aspect;
-  if (h > byHeight) { h = byHeight; w = h / aspect; }
-  return { w, h };
+function CardActions({ activeCard, cards, onDuplicate, onRemove }) {
+  return (
+    <div className="card-actions">
+      <span>
+        {cardLabel(activeCard)}
+        <small>這張牌</small>
+      </span>
+      <IconButton
+        label="複製這張牌"
+        disabled={cards.length >= MAX_CARDS}
+        onClick={onDuplicate}
+      >
+        <Copy size={16} />
+      </IconButton>
+      <IconButton
+        label="刪除這張牌"
+        className="danger-icon"
+        disabled={cards.length <= 1}
+        onClick={onRemove}
+      >
+        <Trash2 size={16} />
+      </IconButton>
+    </div>
+  );
+}
+function HelpDialog({ open, onClose }) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    if (open && !dialog.current.open) dialog.current.showModal();
+    else if (!open && dialog.current.open) dialog.current.close();
+  }, [open]);
+  return (
+    <dialog
+      ref={dialog}
+      className="help-dialog"
+      aria-labelledby="help-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === dialog.current) onClose();
+      }}
+    >
+      <div className="dialog-heading">
+        <span className="dialog-icon">
+          <Sparkles size={23} />
+        </span>
+        <IconButton label="關閉使用說明" onClick={onClose}>
+          <X size={19} />
+        </IconButton>
+      </div>
+      <small className="step-eyebrow">QUICK START</small>
+      <h2 id="help-title">一副好牌，三步就好。</h2>
+      <ol className="help-steps">
+        <li>
+          <span>01</span>
+          <div>
+            <strong>選牌組和牌背</strong>
+            <p>52 張、54 張，或者自訂。所有卡牌保持 63 × 88 mm。</p>
+          </div>
+        </li>
+        <li>
+          <span>02</span>
+          <div>
+            <strong>需要才加圖文</strong>
+            <p>
+              小 Logo 預設 8
+              mm。完整牌面直接上傳；文字自動排版。整副套用或只改一張都可以。
+            </p>
+          </div>
+        </li>
+        <li>
+          <span>03</span>
+          <div>
+            <strong>預覽，再雙面列印</strong>
+            <p>
+              A4 正反頁已逐張配對。列印請選相同的翻頁方式、100%
+              原尺寸，開啟背景圖形並關閉頁首頁尾。先試印一張確認對位。
+            </p>
+          </div>
+        </li>
+      </ol>
+      <div className="help-storage">
+        <ShieldCheck size={18} />
+        <p>
+          設計與圖片只使用此瀏覽器儲存，不會上傳到伺服器。換裝置或清除瀏覽器資料前，請用「儲存設計」下載
+          JSON 備份。
+        </p>
+      </div>
+      <button className="button primary full-width" onClick={onClose}>
+        開始設計
+        <ArrowRight size={16} />
+      </button>
+    </dialog>
+  );
 }
 
-function calcA4CardSize(layout) {
-  const landscape = layout.page.includes('landscape');
-  const pageW = landscape ? 281 : 194;
-  const pageH = landscape ? 194 : 281;
-  const size = sizeForGrid(pageW, pageH, layout.cols, layout.rows, layout.gap);
-  return { w: Number(size.w.toFixed(1)), h: Number(size.h.toFixed(1)) };
-}
-
-function chunk(list, size) {
-  const pages = [];
-  for (let i = 0; i < list.length; i += size) pages.push(list.slice(i, i + size));
-  return pages;
-}
-
-function CardPreview({ side, card, settings }) {
-  const vars = { '--card-w': `${CARD_SIZE.w}mm`, '--card-h': `${CARD_SIZE.h}mm`, '--front-color': settings.frontColor, '--back-color': settings.backColor, '--image-scale': 1 + settings.imageStep * 0.12, '--text-scale': 1 + settings.textStep * 0.08 };
-  return <article className={`card ${side} front-${settings.frontPattern} back-${settings.backPattern} image-${settings.imageSlot} text-${settings.textLayout}`} style={vars}>{side === 'back' ? <CardBack settings={settings}/> : <CardFront card={card} settings={settings}/>}</article>;
-}
-
-function CardBack({ settings }) { return <><Pattern name={settings.backPattern} side="back" image={settings.backUpload}/><div className="back-emblem">{settings.backUpload && settings.backPattern === 'custom' ? <img src={settings.backUpload} alt=""/> : <img src="/icon.svg" alt=""/>}</div><h3>{settings.deckName}</h3><p>Scout System</p><small>{settings.copyright}</small></>; }
-
-function CardFront({ card, settings }) {
-  const red = card.playColor === 'red' || String(card.playColor).startsWith('#');
-  return <><Pattern name={settings.frontPattern} side="front" image={settings.frontUpload}/><div className="front-frame simple-frame"><div className={`corner top-left ${red ? 'red' : ''}`}>{card.number}<span>{card.playSuit}</span></div><div className={`corner top-right ${red ? 'red' : ''}`}>{card.playSuit || suitSymbol(settings.frontPattern)}</div><CardImage card={card} settings={settings}/><CardText card={card} settings={settings}/><div className="copyright-line">{settings.copyright}</div></div></>;
-}
-
-function CardImage({ card, settings }) { if (settings.imageSlot === 'none') return null; return <div className="auto-image-slot">{card.art ? <img src={card.art} alt="card art"/> : <DefaultMark pattern={settings.frontPattern}/>}</div>; }
-function CardText({ card, settings }) { if (settings.textLayout === 'none') return null; return <div className="auto-text-block"><p className="card-title">{card.title}</p><h2>{card.centerText}</h2><p className="card-note">{card.note}</p></div>; }
-function Pattern({ name, side, image }) { const style = image && name === 'custom' ? { backgroundImage: `url(${image})` } : undefined; return <div className={`pattern pattern-${name} pattern-${side}`} style={style} aria-hidden="true"/>; }
-function DefaultMark({ pattern }) { return <div className={`default-mark mark-${pattern}`}>{suitSymbol(pattern)}</div>; }
-function suitSymbol(pattern) { return ({ classic: '♠', clouds: '☁', forest: '▲', stars: '✦', knots: '∞', blank: '•', scout: '✦', cloud: '☁', compass: '◆', chevron: '⌃', plain: '•', custom: '◎' })[pattern] || '✦'; }
-function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) || fallback; } catch { return fallback; } }
-
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById("root")).render(<App />);

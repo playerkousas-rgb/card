@@ -1,12 +1,12 @@
 {
-  "name": "Scout Card Studio",
-  "short_name": "Scout Cards",
-  "description": "旅團自行製作卡牌的 Scout System 工具",
-  "start_url": "/",
+  "name": "啤牌工房 Card Studio",
+  "short_name": "啤牌工房",
+  "description": "快速設計啤牌、小 Logo、完整圖片與文字，A4 雙面對位列印",
+  "start_url": "./",
   "display": "standalone",
-  "background_color": "#f6f0df",
-  "theme_color": "#0f766e",
+  "background_color": "#f5f7f5",
+  "theme_color": "#326453",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

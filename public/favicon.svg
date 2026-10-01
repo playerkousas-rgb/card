@@ -1,7 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs><linearGradient id="g" x1="8" y1="4" x2="56" y2="60"><stop stop-color="#0f766e"/><stop offset="1" stop-color="#1e3a8a"/></linearGradient></defs>
-  <rect width="64" height="64" rx="15" fill="url(#g)"/>
-  <rect x="19" y="9" width="28" height="45" rx="5" fill="#fff1bf" stroke="#fff" stroke-width="3"/>
-  <path d="M33 17c3 5 6 8 12 9-5 3-7 7-8 13-4-5-7-7-13-8 5-3 8-7 9-14z" fill="#0f766e"/>
-  <path d="M25 43c5 3 12 3 17 0" fill="none" stroke="#1e3a8a" stroke-width="4" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Scout Card Studio icon">
+  <defs>
+    <linearGradient id="bg" x1="86" y1="28" x2="430" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f766e"/>
+      <stop offset=".48" stop-color="#14532d"/>
+      <stop offset="1" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <linearGradient id="card" x1="150" y1="86" x2="375" y2="423" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff7d6"/>
+      <stop offset="1" stop-color="#f2d48b"/>
+    </linearGradient>
+    <filter id="shadow" x="80" y="46" width="360" height="430" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#06281f" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <path d="M82 370c43-46 77-55 117-33 22 13 40 18 66 5 50-25 98-7 165 53v117H82V370z" fill="#0b3b31" opacity=".42"/>
+  <g filter="url(#shadow)">
+    <rect x="143" y="75" width="226" height="342" rx="35" fill="url(#card)" stroke="#ffffff" stroke-width="12"/>
+    <rect x="166" y="99" width="180" height="294" rx="23" fill="none" stroke="#0f766e" stroke-width="8" stroke-dasharray="20 12" opacity=".9"/>
+  </g>
+  <path d="M256 139c21 30 38 50 73 54-30 19-43 41-44 78-20-30-43-43-78-44 30-20 45-43 49-88z" fill="#0f766e"/>
+  <path d="M202 299c32 17 76 17 108 0" fill="none" stroke="#1e3a8a" stroke-width="16" stroke-linecap="round"/>
+  <path d="M187 329h138" stroke="#1e3a8a" stroke-width="14" stroke-linecap="round" opacity=".7"/>
+  <circle cx="170" cy="122" r="26" fill="#f8c147" stroke="#fff7d6" stroke-width="8"/>
 </svg>
