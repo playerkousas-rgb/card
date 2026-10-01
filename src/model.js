@@ -29,9 +29,9 @@ export const TEMPLATES = {
 };
 export const FRONT_MODES = [
   { id: "pure", label: "純啤牌", description: "經典花色與點數" },
-  { id: "logo", label: "小 LOGO", description: "保留啤牌，加上標記" },
-  { id: "image", label: "完整圖片", description: "相片或整張牌面" },
-  { id: "text", label: "加入文字", description: "標題、說明或任務" },
+  { id: "logo", label: "小 LOGO", description: "可選保留或取代中間花色" },
+  { id: "image", label: "完整圖片", description: "可選是否顯示中間花色" },
+  { id: "text", label: "加入文字", description: "純文字 · 可取代中間花色" },
 ];
 export const BACK_PATTERNS = [
   { id: "classic", label: "經典花紋" },
@@ -44,14 +44,17 @@ export const DEFAULT_SETTINGS = {
   deckName: "我的啤牌",
   copyright: "",
   logo: "",
-  logoSize: 8,
+  logoSize: 18,
   logoPosition: "bottom-center",
   front: {
     mode: "pure",
     art: "",
     fit: "cover",
     frame: "full",
+    replaceCenter: false,
+    showCenterSuit: false,
     showIndices: false,
+    textSize: 130,
     title: "一起探索",
     body: "每一張牌，都有自己的故事。",
     footer: "",
@@ -187,17 +190,18 @@ export function makeDeck(template, count) {
   return makePokerCards();
 }
 
-export function createProject() {
+export function createProject(template = "poker52", customCount = 12) {
+  const validTemplate = choice(template, Object.keys(TEMPLATES), "poker52");
   return {
     version: 2,
-    template: "poker52",
-    cards: makePokerCards(),
+    template: validTemplate,
+    cards: makeDeck(validTemplate, customCount),
     settings: structuredClone(DEFAULT_SETTINGS),
   };
 }
 
 export function effectiveFront(card, settings) {
-  return { ...settings.front, ...card.front };
+  return { ...DEFAULT_SETTINGS.front, ...settings?.front, ...card?.front };
 }
 
 // Whole-deck edits clear overrides only for the fields being edited. Other individual
@@ -268,10 +272,26 @@ function normalizeFront(source, partial = false) {
   put("fit", choice(data.fit, ["cover", "contain"], defaults.fit));
   put("frame", choice(data.frame, ["full", "white"], defaults.frame));
   put(
+    "replaceCenter",
+    typeof data.replaceCenter === "boolean"
+      ? data.replaceCenter
+      : defaults.replaceCenter,
+  );
+  put(
+    "showCenterSuit",
+    typeof data.showCenterSuit === "boolean"
+      ? data.showCenterSuit
+      : defaults.showCenterSuit,
+  );
+  put(
     "showIndices",
     typeof data.showIndices === "boolean"
       ? data.showIndices
       : defaults.showIndices,
+  );
+  put(
+    "textSize",
+    Math.round(clamp(data.textSize, 60, 220, defaults.textSize)),
   );
   ["title", "body", "footer"].forEach((key) =>
     put(
@@ -333,8 +353,6 @@ function normalizeCard(source, index) {
             : "",
       });
     } else {
-      // Old defaults (Spade / A / ♠) should become a clean playing card, but
-      // user-edited headings, descriptions and artwork must not be discarded.
       const defaultTitle =
         kind === "poker"
           ? { S: "Spade", H: "Heart", D: "Diamond", C: "Club" }[suit]
@@ -431,6 +449,12 @@ export function normalizeProject(source, { requireCards = false } = {}) {
     if (ids.has(card.id)) card.id = uid();
     ids.add(card.id);
   });
+  const paper = choice(print.paper || data.printSize, ["a4", "r3", "r4"], "a4");
+  const defaultPerSheet = paper === "a4" ? 9 : 2;
+  const rawPerSheet = print.perSheet ?? data.a4PerSheet;
+  const perSheet = Math.round(
+    clamp(rawPerSheet, 1, MAX_CARDS, defaultPerSheet),
+  );
   return {
     version: 2,
     template: choice(source.template, Object.keys(TEMPLATES), "poker52"),
@@ -442,11 +466,11 @@ export function normalizeProject(source, { requireCards = false } = {}) {
           ? ""
           : text(data.copyright, 100),
       logo: safeImage(data.logo),
-      logoSize: clamp(data.logoSize, 5, 16, 8),
+      logoSize: clamp(data.logoSize, 5, 45, DEFAULT_SETTINGS.logoSize),
       logoPosition: choice(
         data.logoPosition,
-        ["bottom-center", "top-right", "bottom-left"],
-        "bottom-center",
+        ["center", "bottom-center", "top-right", "bottom-left"],
+        DEFAULT_SETTINGS.logoPosition,
       ),
       front: normalizeFront(front),
       back: {
@@ -466,8 +490,8 @@ export function normalizeProject(source, { requireCards = false } = {}) {
         text: text(back.text, 60),
       },
       print: {
-        paper: choice(print.paper || data.printSize, ["a4", "r3", "r4"], "a4"),
-        perSheet: Number(print.perSheet || data.a4PerSheet) === 6 ? 6 : 9,
+        paper,
+        perSheet,
         flip: choice(print.flip, ["long", "short"], "long"),
         cutMarks: typeof print.cutMarks === "boolean" ? print.cutMarks : true,
         offsetX: clamp(print.offsetX, -3, 3, 0),
