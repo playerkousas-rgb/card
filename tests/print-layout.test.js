@@ -1,0 +1,138 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  buildPrintPlan,
+  cropMarks,
+  mirrorSlots,
+  printLayout,
+} from "../src/print-layout.js";
+
+const cards = (count) =>
+  Array.from({ length: count }, (_, index) => ({ id: String(index + 1) }));
+const ids = (slots) => slots.map((card) => card?.id ?? null);
+
+for (const perSheet of [6, 9]) {
+  for (const count of [1, 6, 9, 10, 52, 54, 108, 160]) {
+    for (const flip of ["long", "short"]) {
+      test(`${count} cards / ${perSheet} slots / ${flip} edge: paired pages and exact alignment`, () => {
+        const source = cards(count);
+        const plan = buildPrintPlan(source, { paper: "a4", perSheet, flip });
+        assert.equal(plan.pages.length, Math.ceil(count / perSheet) * 2);
+        const printedFronts = [];
+        for (let index = 0; index < plan.pages.length; index += 2) {
+          const front = plan.pages[index];
+          const back = plan.pages[index + 1];
+          assert.equal(front.side, "front");
+          assert.equal(back.side, "back");
+          assert.equal(front.sheet, back.sheet);
+          assert.equal(front.sheet, index / 2 + 1);
+          assert.equal(front.slots.length, perSheet);
+          assert.equal(back.slots.length, perSheet);
+          assert.deepEqual(
+            ids(mirrorSlots(back.slots, plan.layout, flip)),
+            ids(front.slots),
+          );
+          assert.equal(back.rotation, flip === "short" ? 180 : 0);
+          printedFronts.push(...front.slots.filter(Boolean));
+        }
+        assert.deepEqual(printedFronts, source);
+      });
+    }
+  }
+}
+
+test("52-card last sheet keeps two blank cells, mirrored into the correct columns", () => {
+  const plan = buildPrintPlan(cards(52), { perSheet: 9, flip: "long" });
+  assert.equal(plan.sheets, 6);
+  assert.deepEqual(ids(plan.pages[10].slots), [
+    "46",
+    "47",
+    "48",
+    "49",
+    "50",
+    "51",
+    "52",
+    null,
+    null,
+  ]);
+  assert.deepEqual(ids(plan.pages[11].slots), [
+    "48",
+    "47",
+    "46",
+    "51",
+    "50",
+    "49",
+    null,
+    null,
+    "52",
+  ]);
+});
+
+test("short-edge positions mirror rows, never the artwork itself", () => {
+  const plan = buildPrintPlan(cards(7), { perSheet: 9, flip: "short" });
+  assert.deepEqual(ids(plan.pages[1].slots), [
+    "7",
+    null,
+    null,
+    "4",
+    "5",
+    "6",
+    "1",
+    "2",
+    "3",
+  ]);
+  assert.equal(plan.pages[1].rotation, 180);
+});
+
+test("A4 uses centered fixed-size 63 × 88 mm cards and a 2 mm gap", () => {
+  const nine = printLayout({ perSheet: 9 });
+  assert.deepEqual(
+    [
+      nine.width,
+      nine.height,
+      nine.cols,
+      nine.rows,
+      nine.gridWidth,
+      nine.gridHeight,
+      nine.left,
+      nine.top,
+    ],
+    [210, 297, 3, 3, 193, 268, 8.5, 14.5],
+  );
+  const six = printLayout({ perSheet: 6 });
+  assert.deepEqual(
+    [six.cols, six.rows, six.gridWidth, six.gridHeight, six.left, six.top],
+    [2, 3, 128, 268, 41, 14.5],
+  );
+});
+
+test("invalid or legacy oversized A4 counts cannot shrink the cards", () => {
+  for (const perSheet of [0, -1, 52, 80, NaN, Infinity, "bad"])
+    assert.equal(printLayout({ perSheet }).count, 9);
+});
+
+test("photo paper has one centered card per front/back page pair", () => {
+  const r3 = buildPrintPlan(cards(2), { paper: "r3" });
+  assert.equal(r3.pages.length, 4);
+  assert.deepEqual(
+    [r3.layout.width, r3.layout.height, r3.layout.left, r3.layout.top],
+    [89, 127, 13, 19.5],
+  );
+  const r4 = printLayout({ paper: "r4" });
+  assert.deepEqual(
+    [r4.width, r4.height, r4.left, r4.top],
+    [102, 152, 19.5, 32],
+  );
+});
+
+test("cut marks are outside occupied cards, never added to blank slots", () => {
+  const plan = buildPrintPlan(cards(7), { perSheet: 9 });
+  const marks = cropMarks(plan.layout, plan.pages[0].slots);
+  assert.equal(marks.length, 7 * 8);
+  for (const [x1, y1, x2, y2] of marks) {
+    assert.ok(Math.min(x1, x2) >= 7);
+    assert.ok(Math.max(x1, x2) <= 203);
+    assert.ok(Math.min(y1, y2) >= 13);
+    assert.ok(Math.max(y1, y2) <= 284);
+  }
+});
