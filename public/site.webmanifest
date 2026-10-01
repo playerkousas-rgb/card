@@ -1,0 +1,12 @@
+{
+  "name": "Scout Card Studio",
+  "short_name": "Scout Cards",
+  "description": "旅團自行製作卡牌的 Scout System 工具",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f0df",
+  "theme_color": "#0f766e",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
