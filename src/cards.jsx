@@ -4,6 +4,7 @@ import {
   cardColor,
   cardLabel,
   cardSymbol,
+  clamp,
   effectiveFront,
 } from "./model.js";
 
@@ -174,17 +175,71 @@ function Corners({ card }) {
   );
 }
 
-function StandardFace({ card }) {
+function StandardFace({ card, hideCenter = false, overlayOnlyCenter = false }) {
   const asset = cardAsset(card);
-  if (asset)
+  if (overlayOnlyCenter) {
+    if (asset) {
+      return (
+        <img
+          className="standard-face image-center-suit"
+          data-testid="image-center-suit"
+          src={assetUrl(asset)}
+          alt=""
+          draggable="false"
+        />
+      );
+    }
+    if (card.kind === "uno") {
+      const display =
+        { Skip: "⊘", Reverse: "⇄", WILD: "✦" }[card.rank] || card.rank;
+      return (
+        <strong
+          className={`uno-value ${String(display).length > 2 ? "small-value" : ""}`}
+          data-testid="image-center-suit"
+        >
+          {display}
+        </strong>
+      );
+    }
     return (
-      <img
-        className="standard-face"
-        src={assetUrl(asset)}
-        alt=""
-        draggable="false"
-      />
+      <span className="custom-number" data-testid="image-center-suit">
+        {card.number}
+      </span>
     );
+  }
+
+  if (asset) {
+    if (hideCenter && card.kind === "joker") {
+      return (
+        <>
+          <span className="standard-border" aria-hidden="true" />
+          <span
+            className="center-suit-mask"
+            data-testid="center-suit-mask"
+            aria-hidden="true"
+          />
+          <Corners card={card} />
+        </>
+      );
+    }
+    return (
+      <>
+        <img
+          className="standard-face"
+          src={assetUrl(asset)}
+          alt=""
+          draggable="false"
+        />
+        {hideCenter && (
+          <span
+            className="center-suit-mask"
+            data-testid="center-suit-mask"
+            aria-hidden="true"
+          />
+        )}
+      </>
+    );
+  }
   if (card.kind === "uno") {
     const display =
       { Skip: "⊘", Reverse: "⇄", WILD: "✦" }[card.rank] || card.rank;
@@ -192,11 +247,20 @@ function StandardFace({ card }) {
       <div className="uno-face" style={{ backgroundColor: card.color }}>
         <div className="uno-oval" />
         <span className="uno-index uno-top">{display}</span>
-        <strong
-          className={`uno-value ${String(display).length > 2 ? "small-value" : ""}`}
-        >
-          {display}
-        </strong>
+        {!hideCenter ? (
+          <strong
+            className={`uno-value ${String(display).length > 2 ? "small-value" : ""}`}
+          >
+            {display}
+          </strong>
+        ) : (
+          <span
+            className="center-suit-mask"
+            data-testid="center-suit-mask"
+            style={{ background: "transparent" }}
+            aria-hidden="true"
+          />
+        )}
         <span className="uno-index uno-bottom">{display}</span>
       </div>
     );
@@ -204,16 +268,29 @@ function StandardFace({ card }) {
   return (
     <>
       <Corners card={card} />
-      <span className="custom-number">{card.number}</span>
+      {!hideCenter ? (
+        <span className="custom-number">{card.number}</span>
+      ) : (
+        <span
+          className="center-suit-mask"
+          data-testid="center-suit-mask"
+          aria-hidden="true"
+        />
+      )}
     </>
   );
 }
 
-function Logo({ settings, back = false }) {
+function Logo({ settings, back = false, replaceCenter = false }) {
+  const pos = back
+    ? "back-logo"
+    : replaceCenter
+      ? "logo-center logo-replace-center"
+      : `logo-${settings.logoPosition}`;
   return (
     <div
-      className={`card-logo ${back ? "back-logo" : `logo-${settings.logoPosition}`}`}
-      style={{ width: `${(settings.logoSize / 63) * 100}%` }}
+      className={`card-logo ${pos}`}
+      style={{ width: `${(clamp(settings.logoSize, 5, 45, 18) / 63) * 100}%` }}
     >
       {settings.logo ? (
         <img src={settings.logo} alt="" />
@@ -234,15 +311,21 @@ export function PlayingCard({
   const back = settings.back;
   const bodyLength =
     front.body.length + (front.body.match(/\n/g)?.length || 0) * 18;
-  const bodySize = Math.min(0.047, Math.sqrt(0.38 / Math.max(bodyLength, 1)));
-  const titleSize =
+  const userScale = clamp(front.textSize, 60, 220, 130) / 100;
+  const bodySize =
+    Math.min(0.052, Math.sqrt(0.38 / Math.max(bodyLength, 1))) * userScale;
+  const baseTitleSize =
     front.title.length > 40
       ? 0.045
       : front.title.length > 20
         ? 0.058
         : front.title.length > 10
           ? 0.075
-          : 0.092;
+          : 0.095;
+  const titleSize = baseTitleSize * userScale;
+  const textShowsCenterSuit =
+    Boolean(front.showCenterSuit) && !front.replaceCenter;
+
   return (
     <article
       className={`playing-card ${side === "back" ? "card-back" : `card-face mode-${front.mode}`} ${className}`}
@@ -274,10 +357,19 @@ export function PlayingCard({
         </>
       ) : (
         <>
-          {(front.mode === "pure" || front.mode === "logo") && (
-            <StandardFace card={card} />
+          {front.mode === "pure" && <StandardFace card={card} />}
+          {front.mode === "logo" && (
+            <>
+              <StandardFace
+                card={card}
+                hideCenter={Boolean(front.replaceCenter)}
+              />
+              <Logo
+                settings={settings}
+                replaceCenter={Boolean(front.replaceCenter)}
+              />
+            </>
           )}
-          {front.mode === "logo" && <Logo settings={settings} />}
           {front.mode === "image" && (
             <>
               {front.art ? (
@@ -288,7 +380,10 @@ export function PlayingCard({
                 />
               ) : (
                 <>
-                  <StandardFace card={card} />
+                  <StandardFace
+                    card={card}
+                    hideCenter={!front.showCenterSuit}
+                  />
                   <div className="image-placeholder preview-only">
                     <svg viewBox="0 0 40 40" aria-hidden="true">
                       <rect x="5" y="5" width="30" height="30" rx="4" />
@@ -299,14 +394,28 @@ export function PlayingCard({
                   </div>
                 </>
               )}
+              {front.art && front.showCenterSuit && (
+                <StandardFace card={card} overlayOnlyCenter />
+              )}
               {front.showIndices && <Corners card={card} />}
             </>
           )}
           {front.mode === "text" && (
             <>
-              {front.showIndices && <Corners card={card} />}
+              {textShowsCenterSuit ? (
+                <StandardFace card={card} hideCenter={false} />
+              ) : (
+                <>
+                  {front.replaceCenter && (
+                    <StandardFace card={card} hideCenter={true} />
+                  )}
+                  {!front.replaceCenter && front.showIndices && (
+                    <Corners card={card} />
+                  )}
+                </>
+              )}
               <div
-                className="text-card-content"
+                className={`text-card-content ${textShowsCenterSuit ? "keep-center" : "replace-center"}`}
                 style={{ "--body-size": bodySize, "--title-size": titleSize }}
               >
                 <span className="text-card-rule" />

@@ -22,12 +22,15 @@ async function saved(page) {
   await expect(page.locator(".save-status")).toHaveClass(/saved/);
 }
 
-test("normal 52-card deck, real local artwork and functional navigation", async ({
+test("normal 52-card deck, real local artwork, functional navigation, and no Google Drive links", async ({
   page,
 }) => {
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await openStudio(page);
+  await expect(page.locator('a[href*="drive.google.com"]')).toHaveCount(0);
+  await expect(page.locator("body")).not.toContainText("drive.google.com");
+  await expect(page.locator("body")).not.toContainText("參考素材");
   await expect(page.getByRole("option")).toHaveCount(52);
   await expect(page.locator(".card-pair .standard-face")).toHaveAttribute(
     "src",
@@ -54,7 +57,7 @@ test("normal 52-card deck, real local artwork and functional navigation", async 
   expect(errors).toEqual([]);
 });
 
-test("individual text card stays isolated; undo and redo work", async ({
+test("individual text card offers option to replace or show center suit, stays isolated, and undo/redo work", async ({
   page,
 }) => {
   await openStudio(page);
@@ -67,6 +70,16 @@ test("individual text card stays isolated; undo and redo work", async ({
     .getByLabel("內容", { exact: true })
     .fill("晴天常見的雲，像棉花一樣。");
   await expect(page.locator(".card-pair h3")).toHaveText("積雲");
+  await nav(page, "取代正中間花色").click();
+  await expect(
+    page.locator(".card-pair .card-face [data-testid='center-suit-mask']"),
+  ).toBeVisible();
+  await expect(page.locator(".card-pair .card-face .standard-face")).toBeVisible();
+  await nav(page, "顯示中間花色").click();
+  await expect(
+    page.locator(".card-pair .card-face [data-testid='center-suit-mask']"),
+  ).toHaveCount(0);
+  await expect(page.locator(".card-pair .card-face .standard-face")).toBeVisible();
   await expect(
     page.locator(".print-output .print-page").first().locator(".mode-text"),
   ).toHaveCount(1);
@@ -77,16 +90,13 @@ test("individual text card stays isolated; undo and redo work", async ({
   );
   await page.getByRole("option", { name: "2♠", exact: true }).click();
   await nav(page, "復原").click();
-  await expect(page.getByLabel("內容", { exact: true })).not.toHaveValue(
-    "晴天常見的雲，像棉花一樣。",
-  );
   await nav(page, "重做").click();
   await expect(page.getByLabel("內容", { exact: true })).toHaveValue(
     "晴天常見的雲，像棉花一樣。",
   );
 });
 
-test("small logo uploads as a local image at 8 mm, persists and remains optional on backs", async ({
+test("small logo defaults to 18 mm keeping center suit, offers option to replace center suit at 24 mm, persists, and remains optional on backs", async ({
   page,
 }) => {
   await openStudio(page);
@@ -97,6 +107,9 @@ test("small logo uploads as a local image at 8 mm, persists and remains optional
     "src",
     /^data:image\/png;base64,/,
   );
+  await expect(
+    page.locator(".card-pair .card-face [data-testid='center-suit-mask']"),
+  ).toHaveCount(0);
   const ratio = await page
     .locator(".card-pair .card-face")
     .evaluate(
@@ -104,7 +117,14 @@ test("small logo uploads as a local image at 8 mm, persists and remains optional
         card.querySelector(".card-logo").getBoundingClientRect().width /
         card.getBoundingClientRect().width,
     );
-  expect(ratio).toBeCloseTo(8 / 63, 2);
+  expect(ratio).toBeCloseTo(18 / 63, 2);
+  await nav(page, "取代正中間花色（占正中央）").click();
+  await expect(
+    page.locator(".card-pair .card-face [data-testid='center-suit-mask']"),
+  ).toBeVisible();
+  await expect(page.locator(".card-pair .card-face .card-logo")).toHaveClass(
+    /logo-replace-center/,
+  );
   await saved(page);
   await page.reload();
   await expect(page.locator(".card-pair .card-logo img")).toBeVisible();
@@ -115,6 +135,56 @@ test("small logo uploads as a local image at 8 mm, persists and remains optional
   await expect(
     page.locator(".card-pair .card-back .card-logo img"),
   ).toBeVisible();
+});
+
+test("browser design storage saves, lists, switches, and deletes multiple user designs", async ({
+  page,
+}) => {
+  await openStudio(page);
+  await page.getByLabel("牌組名稱", { exact: true }).fill("第一款氣象牌");
+  await nav(page, "存入瀏覽器").click();
+  await expect(page.getByRole("alert")).toContainText("已存入瀏覽器");
+
+  await page.getByLabel("牌組名稱", { exact: true }).fill("第二款童軍牌");
+  await page.getByRole("button", { name: /我的設計/ }).click();
+  const dialog = page.getByRole("dialog", { name: "瀏覽器儲存的設計" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "另存為新設計" }).click();
+  await expect(dialog.locator(".dialog-design-card")).toHaveCount(2);
+
+  const firstCard = dialog
+    .locator(".dialog-design-card")
+    .filter({ hasText: "第一款氣象牌" });
+  await firstCard.getByRole("button", { name: "載入" }).click();
+  await expect(page.getByLabel("牌組名稱", { exact: true })).toHaveValue(
+    "第一款氣象牌",
+  );
+
+  await page.getByRole("button", { name: /我的設計/ }).click();
+  await expect(dialog).toBeVisible();
+  const secondCard = dialog
+    .locator(".dialog-design-card")
+    .filter({ hasText: "第二款童軍牌" });
+  await secondCard.getByRole("button", { name: /刪除/ }).click();
+  await expect(dialog.locator(".dialog-design-card")).toHaveCount(1);
+  await dialog.getByRole("button", { name: "關閉" }).click();
+});
+
+test("A4 cards-per-sheet selector allows choosing arbitrary counts and 3R defaults to 2 cards", async ({
+  page,
+}) => {
+  await openStudio(page);
+  await expect(printPages(page)).toHaveCount(12); // 52 cards / 9 per sheet = 6 sheets = 12 pages
+  await page.getByRole("button", { name: "4 張", exact: true }).click();
+  await expect(printPages(page)).toHaveCount(26); // 52 cards / 4 per sheet = 13 sheets = 26 pages
+  await page.getByLabel("每張 A4 印幾張牌", { exact: true }).fill("16");
+  await expect(printPages(page)).toHaveCount(8); // 52 cards / 16 per sheet = 4 sheets = 8 pages
+  await page.getByRole("button", { name: "9 張", exact: true }).click();
+  await expect(printPages(page)).toHaveCount(12);
+
+  await nav(page, "輸出").click();
+  await page.getByRole("radio", { name: /3R 相片紙/ }).click();
+  await expect(printPages(page)).toHaveCount(52); // 52 cards / 2 per 3R sheet = 26 sheets = 52 pages
 });
 
 test("complete images can be added in a batch without altering the next unedited card", async ({
@@ -157,6 +227,17 @@ test("complete images can be added in a batch without altering the next unedited
   await expect(page.locator(".card-pair .full-card-image")).toHaveClass(
     /frame-white/,
   );
+  await expect(
+    page.locator(".card-pair .card-face [data-testid='image-center-suit']"),
+  ).toHaveCount(0);
+  await nav(page, "顯示正中間花色（似啤牌）").click();
+  await expect(
+    page.locator(".card-pair .card-face [data-testid='image-center-suit']"),
+  ).toBeVisible();
+  await nav(page, "不顯示（不擋圖案）").click();
+  await expect(
+    page.locator(".card-pair .card-face [data-testid='image-center-suit']"),
+  ).toHaveCount(0);
 });
 
 test("uploaded back image replaces the pattern, without duplicated logos or app branding", async ({
@@ -333,13 +414,14 @@ test("JSON backup contains images and re-imports cleanly; invalid files show a c
   await expect(page.getByRole("alert")).toContainText("檔案格式不正確");
 });
 
-test("photo output remains centered at real card size, with paired pages", async ({
+test("3R photo output defaults to 2 real-size cards per sheet with paired pages", async ({
   page,
 }) => {
   await openStudio(page);
   const project = createProject();
   project.cards = project.cards.slice(0, 2);
   project.settings.print.paper = "r3";
+  project.settings.print.perSheet = 2;
   project.template = "custom";
   page.on("dialog", (dialog) => dialog.accept());
   await page.getByTestId("import-design").setInputFiles({
@@ -347,20 +429,23 @@ test("photo output remains centered at real card size, with paired pages", async
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(project)),
   });
-  await expect(printPages(page)).toHaveCount(4);
+  await expect(printPages(page)).toHaveCount(2);
   await page.emulateMedia({ media: "print" });
   const card = await printPages(page)
     .first()
     .locator(".playing-card")
+    .first()
     .boundingBox();
-  expect((card.x * 25.4) / 96).toBeCloseTo(13, 1);
-  expect((card.y * 25.4) / 96).toBeCloseTo(19.5, 1);
   expect((card.width * 25.4) / 96).toBeCloseTo(63, 1);
+  expect((card.height * 25.4) / 96).toBeCloseTo(88, 1);
   const pdf = await PDFDocument.load(
     await page.pdf({ preferCSSPageSize: true, printBackground: true }),
   );
-  expect(pdf.getPageCount()).toBe(4);
-  expect(Math.abs(pdf.getPage(0).getWidth() - (89 * 72) / 25.4)).toBeLessThan(
+  expect(pdf.getPageCount()).toBe(2);
+  expect(Math.abs(pdf.getPage(0).getWidth() - (127 * 72) / 25.4)).toBeLessThan(
+    0.5,
+  );
+  expect(Math.abs(pdf.getPage(0).getHeight() - (89 * 72) / 25.4)).toBeLessThan(
     0.5,
   );
 });
@@ -431,7 +516,7 @@ test("blocked storage produces a real warning but still permits a JSON backup", 
   expect((await download).suggestedFilename()).toMatch(/-design\.json$/);
 });
 
-test("legacy localStorage data is migrated without losing suits or changing physical card size", async ({
+test("legacy localStorage data is migrated without losing suits", async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -462,7 +547,7 @@ test("legacy localStorage data is migrated without losing suits or changing phys
     );
     localStorage.setItem("deckName", "原本的牌組");
     localStorage.setItem("printSize", "a4");
-    localStorage.setItem("a4PerSheet", "52");
+    localStorage.setItem("a4PerSheet", "9");
   });
   await openStudio(page);
   await expect(page.getByRole("option")).toHaveCount(2);

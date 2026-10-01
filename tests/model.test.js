@@ -15,6 +15,11 @@ import {
   normalizeProject,
   safeImage,
 } from "../src/model.js";
+import {
+  deleteSavedDesign,
+  loadSavedDesigns,
+  saveDesignToBrowser,
+} from "../src/storage.js";
 
 const PNG = "data:image/png;base64,aGVsbG8=";
 
@@ -76,11 +81,15 @@ test("new projects are independent and default to real poker cards / A4 duplex",
   one.settings.back.color = "#112233";
   assert.equal(two.settings.back.color, DEFAULT_SETTINGS.back.color);
   assert.equal(two.settings.front.mode, "pure");
-  assert.equal(two.settings.logoSize, 8);
+  assert.equal(two.settings.front.replaceCenter, false);
+  assert.equal(two.settings.front.showCenterSuit, false);
+  assert.equal(two.settings.logoSize, 18);
+  assert.equal(two.settings.logoPosition, "bottom-center");
   assert.equal(two.settings.logo, "");
   assert.equal(two.settings.back.text, "");
   assert.equal(two.settings.back.showLogo, false);
   assert.equal(two.settings.print.paper, "a4");
+  assert.equal(two.settings.print.perSheet, 9);
   assert.equal(two.settings.print.flip, "long");
 });
 
@@ -89,12 +98,14 @@ test("per-card changes do not leak into other cards or mutate the original proje
   const id = project.cards[1].id;
   const next = applyFrontPatch(
     project,
-    { mode: "text", title: "積雲" },
+    { mode: "text", title: "積雲", replaceCenter: true },
     "card",
     id,
   );
   assert.equal(effectiveFront(next.cards[1], next.settings).title, "積雲");
+  assert.equal(effectiveFront(next.cards[1], next.settings).replaceCenter, true);
   assert.equal(effectiveFront(next.cards[0], next.settings).mode, "pure");
+  assert.equal(effectiveFront(next.cards[0], next.settings).replaceCenter, false);
   assert.deepEqual(project.cards[1].front, {});
 });
 
@@ -117,9 +128,12 @@ test("whole-deck updates clear matching overrides but retain unrelated card cont
 test("version 2 export/import round-trips all artwork and print settings", () => {
   const project = createProject();
   project.settings.logo = PNG;
+  project.settings.logoSize = 32;
+  project.settings.front.replaceCenter = false;
   project.settings.back.art = PNG;
   project.settings.back.pattern = "upload";
   project.settings.print.flip = "short";
+  project.settings.print.perSheet = 16;
   project.settings.print.offsetX = -0.7;
   project.cards[10].front = { mode: "image", art: PNG, showIndices: true };
   assert.deepEqual(
@@ -130,7 +144,7 @@ test("version 2 export/import round-trips all artwork and print settings", () =>
   );
 });
 
-test("legacy JSON recovers missing suit fields, preserves artwork, fixes unsafe A4 sizing", () => {
+test("legacy JSON recovers missing suit fields, preserves artwork, and keeps custom A4 perSheet", () => {
   const old = {
     template: "poker52",
     deckName: "舊牌組",
@@ -168,8 +182,17 @@ test("legacy JSON recovers missing suit fields, preserves artwork, fixes unsafe 
   assert.equal(project.cards[1].front.art, PNG);
   assert.equal(project.settings.back.art, PNG);
   assert.equal(project.settings.back.pattern, "upload");
-  assert.equal(project.settings.print.perSheet, 9);
+  assert.equal(project.settings.print.perSheet, 52);
   assert.equal(project.settings.copyright, "");
+});
+
+test("3R photo paper defaults to 2 cards per sheet when normalized without perSheet", () => {
+  const project = normalizeProject({
+    settings: { print: { paper: "r3" } },
+    cards: makePokerCards().slice(0, 4),
+  });
+  assert.equal(project.settings.print.paper, "r3");
+  assert.equal(project.settings.print.perSheet, 2);
 });
 
 test("malformed imports fail clearly; duplicate card IDs are repaired", () => {
@@ -208,7 +231,7 @@ test("unknown settings, invalid colors, non-finite offsets and external image UR
   assert.equal(clean.settings.print.offsetX, 0);
   assert.equal(clean.settings.print.offsetY, 3);
   assert.equal(clean.settings.logo, "");
-  assert.equal(clean.settings.logoSize, 8);
+  assert.equal(clean.settings.logoSize, 18);
   assert.equal(safeImage("javascript:alert(1)"), "");
 });
 
@@ -250,4 +273,46 @@ test("legacy edited headings and notes survive migration alongside card artwork"
   assert.equal(imported.cards[1].front.title, "相片卡");
   assert.equal(imported.cards[1].front.body, "原本的補充文字");
   assert.equal(imported.cards[1].front.footer, "活動名稱");
+});
+
+test("browser design library saves, updates, loads, and deletes designs via localStorage fallback", async () => {
+  const store = new Map();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key) => (store.has(key) ? store.get(key) : null),
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+    },
+  });
+  try {
+    const first = createProject("poker52");
+    first.settings.deckName = "氣象啤牌";
+    const res1 = await saveDesignToBrowser(first);
+    assert.equal(res1.ok, true);
+    assert.equal(res1.designs.length, 1);
+    assert.equal(res1.designs[0].name, "氣象啤牌");
+
+    const second = createProject("custom", 16);
+    second.settings.deckName = "自訂活動卡";
+    const res2 = await saveDesignToBrowser(second);
+    assert.equal(res2.designs.length, 2);
+
+    first.settings.deckName = "氣象啤牌 v2";
+    const updated = await saveDesignToBrowser(first, res1.entry.id);
+    assert.equal(updated.designs.length, 2);
+    assert.equal(
+      updated.designs.find((item) => item.id === res1.entry.id).name,
+      "氣象啤牌 v2",
+    );
+
+    const loaded = await loadSavedDesigns();
+    assert.equal(loaded.length, 2);
+
+    const afterDelete = await deleteSavedDesign(res1.entry.id);
+    assert.equal(afterDelete.length, 1);
+    assert.equal(afterDelete[0].name, "自訂活動卡");
+  } finally {
+    delete globalThis.localStorage;
+  }
 });

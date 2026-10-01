@@ -6,6 +6,8 @@ export function PrintPage({ page, layout, settings, sheets, preview = false }) {
   const back = page.side === "back";
   const offsetX = back ? settings.print.offsetX : 0;
   const offsetY = back ? settings.print.offsetY : 0;
+  const cw = layout.cardWidth || 63;
+  const ch = layout.cardHeight || 88;
   const paperStyle = {
     "--paper-width": preview
       ? "var(--preview-paper-width, 260px)"
@@ -13,8 +15,8 @@ export function PrintPage({ page, layout, settings, sheets, preview = false }) {
     "--paper-height": preview
       ? `calc(var(--paper-width) * ${layout.height / layout.width})`
       : `${layout.height}mm`,
-    "--card-width": `calc(var(--paper-width) * ${63 / layout.width})`,
-    "--card-height": `calc(var(--paper-height) * ${88 / layout.height})`,
+    "--card-width": `calc(var(--paper-width) * ${cw / layout.width})`,
+    "--card-height": `calc(var(--paper-height) * ${ch / layout.height})`,
   };
   const gridStyle = {
     left: `${((layout.left + offsetX) / layout.width) * 100}%`,
@@ -23,8 +25,8 @@ export function PrintPage({ page, layout, settings, sheets, preview = false }) {
     height: `${(layout.gridHeight / layout.height) * 100}%`,
     gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
     gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
-    columnGap: `${(layout.gap / layout.gridWidth) * 100}%`,
-    rowGap: `${(layout.gap / layout.gridHeight) * 100}%`,
+    columnGap: `${layout.gridWidth ? (layout.gap / layout.gridWidth) * 100 : 0}%`,
+    rowGap: `${layout.gridHeight ? (layout.gap / layout.gridHeight) * 100 : 0}%`,
   };
   return (
     <div
@@ -67,12 +69,12 @@ export function PrintPage({ page, layout, settings, sheets, preview = false }) {
             </g>
           )}
           <g fill="#747d77" fontSize="2.1">
-            <text x={layout.left} y="9">
+            <text x={layout.left} y="6.5">
               {settings.deckName.slice(0, 24)} · {page.sheet}/{sheets} ·{" "}
               {back ? "反面" : "正面"}
             </text>
-            <text x={layout.width - layout.left} y="9" textAnchor="end">
-              63 × 88 mm · 100%
+            <text x={layout.width - layout.left} y="6.5" textAnchor="end">
+              {cw} × {ch} mm · {cw === 63 && ch === 88 ? "100%" : `${layout.count} 張/頁`}
             </text>
           </g>
         </svg>

@@ -9,6 +9,8 @@ import { createRoot } from "react-dom/client";
 import {
   ArrowDownToLine,
   ArrowRight,
+  BookmarkCheck,
+  BookmarkPlus,
   Check,
   CheckCheck,
   ChevronDown,
@@ -21,7 +23,7 @@ import {
   ExternalLink,
   FileUp,
   FlipHorizontal2,
-  FolderOpen,
+  FolderHeart,
   Image as ImageIcon,
   Layers3,
   LoaderCircle,
@@ -58,9 +60,16 @@ import {
   normalizeProject,
 } from "./model.js";
 import { BackArtwork, PlayingCard } from "./cards.jsx";
-import { buildPrintPlan, PAPERS } from "./print-layout.js";
+import { A4_CHOICES, buildPrintPlan, PAPERS } from "./print-layout.js";
 import { PrintOutput, PrintPage } from "./print.jsx";
-import { downloadProject, loadProject, saveProject } from "./storage.js";
+import {
+  deleteSavedDesign,
+  downloadProject,
+  loadProject,
+  loadSavedDesigns,
+  saveDesignToBrowser,
+  saveProject,
+} from "./storage.js";
 import { readImage } from "./images.js";
 import { useProjectHistory } from "./use-history.js";
 
@@ -77,7 +86,7 @@ const STEPS = [
     id: "front",
     label: "牌面",
     heading: "加一點你的心思",
-    subtitle: "純牌、Logo、圖片或文字，直接選。",
+    subtitle: "純牌、Logo、圖片或純文字，直接選。",
     icon: CreditCard,
   },
   {
@@ -91,27 +100,9 @@ const STEPS = [
     id: "print",
     label: "輸出",
     heading: "準備好，雙面列印",
-    subtitle: "正反面已配對，不用自己排版。",
+    subtitle: "自選每張紙印幾張牌，正反面自動配對。",
     icon: Printer,
   },
-];
-const REFERENCES = [
-  [
-    "純牌",
-    "https://drive.google.com/drive/folders/1DjUC8vcdp3zcDM8DPFakj2EpTEzqebVV",
-  ],
-  [
-    "純牌（有邊）",
-    "https://drive.google.com/drive/folders/1ikyxnceJAzfp9jNJTNryi_fv8l3xEeNc",
-  ],
-  [
-    "四色牌背",
-    "https://drive.google.com/drive/folders/1S892CHsqif4foTjGgGW4VJaS-Y3VF7FF",
-  ],
-  [
-    "氣象組 LOGO",
-    "https://drive.google.com/file/d/1NCUQlHqDfICXlEqWzl7Kbg44H91EfmYb/view",
-  ],
 ];
 
 function radioKeys(event) {
@@ -294,28 +285,6 @@ function UploadZone({
     </div>
   );
 }
-function ReferenceLinks() {
-  return (
-    <details className="reference-links">
-      <summary>
-        <FolderOpen size={16} />
-        <span>使用你的參考素材</span>
-        <ChevronDown size={15} />
-      </summary>
-      <div className="reference-content">
-        <p>Drive 內的純牌、牌背與 Logo，下載後可直接上傳。</p>
-        <div>
-          {REFERENCES.map(([label, url]) => (
-            <a key={label} href={url} target="_blank" rel="noreferrer">
-              {label}
-              <ExternalLink size={12} />
-            </a>
-          ))}
-        </div>
-      </div>
-    </details>
-  );
-}
 function Brand() {
   return (
     <div className="brand">
@@ -328,6 +297,19 @@ function Brand() {
       </span>
     </div>
   );
+}
+
+function formatSavedTime(timestamp) {
+  try {
+    return new Intl.DateTimeFormat("zh-HK", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(timestamp));
+  } catch {
+    return "";
+  }
 }
 
 function App() {
@@ -343,6 +325,9 @@ function App() {
   const [sheetIndex, setSheetIndex] = useState(0);
   const [zoom, setZoom] = useState(100);
   const [storageStatus, setStorageStatus] = useState("saving");
+  const [savedDesigns, setSavedDesigns] = useState([]);
+  const [activeDesignId, setActiveDesignId] = useState(null);
+  const [designsOpen, setDesignsOpen] = useState(false);
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const [printing, setPrinting] = useState(false);
@@ -382,13 +367,16 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    loadProject().then((saved) => {
-      if (cancelled) return;
-      replace(saved);
-      setActiveId(saved.cards[0].id);
-      setCustomCount(saved.template === "custom" ? saved.cards.length : 12);
-      setReady(true);
-    });
+    Promise.all([loadProject(), loadSavedDesigns()]).then(
+      ([saved, designs]) => {
+        if (cancelled) return;
+        replace(saved);
+        setSavedDesigns(designs);
+        setActiveId(saved.cards[0].id);
+        setCustomCount(saved.template === "custom" ? saved.cards.length : 12);
+        setReady(true);
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -446,13 +434,70 @@ function App() {
     const timer = setTimeout(() => setNotice(null), 5000);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  const handleSaveToBrowser = useCallback(
+    async (asNew = false) => {
+      try {
+        const { entry, designs } = await saveDesignToBrowser(
+          project,
+          asNew ? null : activeDesignId,
+        );
+        setSavedDesigns(designs);
+        setActiveDesignId(entry.id);
+        notify(`已將「${entry.name}」儲存在瀏覽器設計庫。`);
+      } catch {
+        notify("瀏覽器空間不足，請用「儲存設計」下載 JSON 備份。", "error");
+      }
+    },
+    [project, activeDesignId, notify],
+  );
+
+  const handleLoadFromBrowser = useCallback(
+    (entry) => {
+      try {
+        const loaded = normalizeProject(entry.project, { requireCards: true });
+        change(loaded);
+        setActiveDesignId(entry.id);
+        setActiveId(loaded.cards[0].id);
+        setSuitFilter("all");
+        setSheetIndex(0);
+        setCustomCount(loaded.template === "custom" ? loaded.cards.length : 12);
+        setDesignsOpen(false);
+        notify(`已從瀏覽器載入「${entry.name}」。`);
+      } catch {
+        notify("未能載入此設計。", "error");
+      }
+    },
+    [change, notify],
+  );
+
+  const handleDeleteFromBrowser = useCallback(
+    async (entry) => {
+      try {
+        const next = await deleteSavedDesign(entry.id);
+        setSavedDesigns(next);
+        if (activeDesignId === entry.id) setActiveDesignId(null);
+        notify(`已從瀏覽器移除「${entry.name}」。`);
+      } catch {
+        notify("未能刪除設計。", "error");
+      }
+    },
+    [activeDesignId, notify],
+  );
+
   useEffect(() => {
     const handler = (event) => {
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === "s") {
         event.preventDefault();
+        saveDesignToBrowser(project, activeDesignId)
+          .then(({ entry, designs }) => {
+            setSavedDesigns(designs);
+            setActiveDesignId(entry.id);
+          })
+          .catch(() => {});
         downloadProject(project);
-        notify("設計檔已下載，隨時可以再載入。");
+        notify("設計已存入瀏覽器並下載備份檔。");
       }
       if (
         event.target instanceof HTMLElement &&
@@ -471,7 +516,7 @@ function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [project, undo, redo, notify]);
+  }, [project, activeDesignId, undo, redo, notify]);
   useEffect(() => {
     const handler = () => {
       setPrinting(false);
@@ -494,7 +539,10 @@ function App() {
 
   const fitZoom = useCallback(() => {
     const width = view === "cards" ? 238 : 260;
-    const height = view === "cards" ? 333 : 368;
+    const height =
+      view === "cards"
+        ? 333
+        : Math.round(260 * (plan.layout.height / plan.layout.width));
     const pair = stageRef.current?.querySelector(
       view === "cards" ? ".card-pair" : ".sheet-pair",
     );
@@ -511,7 +559,7 @@ function App() {
         100,
       ),
     );
-  }, [view, stageSize]);
+  }, [view, stageSize, plan.layout.height, plan.layout.width]);
   useEffect(() => {
     if (autoFit.current) setZoom(fitZoom());
   }, [fitZoom]);
@@ -557,6 +605,11 @@ function App() {
         print: { ...current.settings.print, ...patch },
       },
     }));
+  const changePaper = (nextPaper) => {
+    const defaultPerSheet = nextPaper === "a4" ? 9 : 2;
+    patchPrint({ paper: nextPaper, perSheet: defaultPerSheet });
+    setSheetIndex(0);
+  };
   const patchFront = (patch) =>
     change((current) => applyFrontPatch(current, patch, scope, activeCard.id));
   const patchCard = (patch) =>
@@ -735,6 +788,7 @@ function App() {
       setSuitFilter("all");
       setSheetIndex(0);
       setCustomCount(saved.template === "custom" ? saved.cards.length : 12);
+      setDesignsOpen(false);
       notify("設計已載入。");
     } catch (error) {
       notify(
@@ -788,6 +842,23 @@ function App() {
                 : "儲存中…"}
           </div>
           <div className="header-actions">
+            <button
+              className="button quiet"
+              onClick={() => setDesignsOpen(true)}
+            >
+              <FolderHeart size={17} />
+              <span>
+                我的設計
+                {savedDesigns.length > 0 ? ` (${savedDesigns.length})` : ""}
+              </span>
+            </button>
+            <button
+              className="button quiet"
+              onClick={() => handleSaveToBrowser(true)}
+            >
+              <BookmarkPlus size={17} />
+              <span>存入瀏覽器</span>
+            </button>
             <label className="button quiet load-design">
               <FileUp size={17} />
               <span>載入設計</span>
@@ -803,8 +874,14 @@ function App() {
             <button
               className="button quiet"
               onClick={() => {
+                saveDesignToBrowser(project, activeDesignId)
+                  .then(({ entry, designs }) => {
+                    setSavedDesigns(designs);
+                    setActiveDesignId(entry.id);
+                  })
+                  .catch(() => {});
                 downloadProject(project);
-                notify("設計檔已下載，隨時可以再載入。");
+                notify("設計已存入瀏覽器並下載備份檔。");
               }}
             >
               <ArrowDownToLine size={17} />
@@ -949,15 +1026,153 @@ function App() {
                       </button>
                     </div>
                   )}
-                  <div className="info-note">
-                    <ShieldCheck size={18} />
-                    <div>
-                      <strong>真正的啤牌尺寸</strong>
-                      <p>
-                        固定 63 × 88 mm。A4 排版不縮小，剪裁後就是正常啤牌。
+
+                  <div className="section-label">
+                    列印紙張與每張紙牌數
+                    <span>
+                      {plan.layout.cardWidth} × {plan.layout.cardHeight} mm
+                    </span>
+                  </div>
+                  <Segmented
+                    label="選擇列印紙張"
+                    options={[
+                      { id: "a4", label: "A4 紙" },
+                      { id: "r3", label: "3R（預設 2 張）" },
+                      { id: "r4", label: "4R（預設 2 張）" },
+                    ]}
+                    value={settings.print.paper}
+                    onChange={changePaper}
+                  />
+                  {settings.print.paper === "a4" ? (
+                    <div className="sheet-count-picker">
+                      <div
+                        className="per-sheet-chips"
+                        role="group"
+                        aria-label="1 張 A4 紙印幾張牌快速選擇"
+                      >
+                        {A4_CHOICES.map((count) => (
+                          <button
+                            key={count}
+                            type="button"
+                            className={`chip-button ${settings.print.perSheet === count ? "selected" : ""}`}
+                            aria-pressed={settings.print.perSheet === count}
+                            onClick={() => {
+                              patchPrint({ perSheet: count });
+                              setSheetIndex(0);
+                            }}
+                          >
+                            {count} 張
+                          </button>
+                        ))}
+                      </div>
+                      <Field
+                        label="1 張 A4 紙印幾張牌（1–160）"
+                        hint={`${plan.layout.cols} × ${plan.layout.rows} 排列 · 每張卡 ${plan.layout.cardWidth} × ${plan.layout.cardHeight} mm · 共 ${plan.sheets} 張 A4`}
+                      >
+                        <input
+                          type="number"
+                          min="1"
+                          max={MAX_CARDS}
+                          aria-label="1 張 A4 紙印幾張牌"
+                          value={settings.print.perSheet}
+                          onChange={(event) => {
+                            const next = clamp(
+                              event.target.value,
+                              1,
+                              MAX_CARDS,
+                              9,
+                            );
+                            patchPrint({ perSheet: Math.round(next) });
+                            setSheetIndex(0);
+                          }}
+                        />
+                      </Field>
+                    </div>
+                  ) : (
+                    <div className="sheet-count-picker">
+                      <Segmented
+                        label="每張相片紙卡牌數量"
+                        options={[
+                          { id: 2, label: "2 張（標準 63 × 88 mm）" },
+                          { id: 1, label: "1 張（單張置中）" },
+                        ]}
+                        value={settings.print.perSheet}
+                        onChange={(perSheet) => {
+                          patchPrint({ perSheet });
+                          setSheetIndex(0);
+                        }}
+                      />
+                      <p className="field-hint">
+                        預設 1 張 {settings.print.paper === "r3" ? "3R" : "4R"}{" "}
+                        印 2 張卡，剛好是 63 × 88 mm 正常卡牌大小。
                       </p>
                     </div>
+                  )}
+
+                  <div className="browser-designs-box">
+                    <div className="section-label">
+                      瀏覽器儲存的設計
+                      <span>{savedDesigns.length} 個存檔</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="button secondary full-width"
+                      onClick={() => handleSaveToBrowser(true)}
+                    >
+                      <BookmarkPlus size={16} />
+                      將目前設計存入瀏覽器
+                    </button>
+                    {savedDesigns.length > 0 ? (
+                      <div
+                        className="saved-design-list"
+                        aria-label="瀏覽器已儲存的設計"
+                      >
+                        {savedDesigns.slice(0, 5).map((item) => (
+                          <div
+                            key={item.id}
+                            className={`saved-design-row ${activeDesignId === item.id ? "current" : ""}`}
+                          >
+                            <div className="saved-design-info">
+                              <strong>{item.name}</strong>
+                              <small>
+                                {item.cardCount} 張 ·{" "}
+                                {formatSavedTime(item.updatedAt)}
+                              </small>
+                            </div>
+                            <button
+                              type="button"
+                              className="button quiet compact-btn"
+                              onClick={() => handleLoadFromBrowser(item)}
+                            >
+                              載入
+                            </button>
+                            <IconButton
+                              label={`刪除 ${item.name}`}
+                              className="danger-icon"
+                              onClick={() => handleDeleteFromBrowser(item)}
+                            >
+                              <Trash2 size={14} />
+                            </IconButton>
+                          </div>
+                        ))}
+                        {savedDesigns.length > 5 && (
+                          <button
+                            type="button"
+                            className="text-button full-width"
+                            onClick={() => setDesignsOpen(true)}
+                          >
+                            查看全部 {savedDesigns.length} 個設計
+                            <ArrowRight size={13} />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="field-hint">
+                        按上方按鈕即可在瀏覽器保存多個不同版本的卡牌設計，隨時切換載入。
+                      </p>
+                    )}
                   </div>
+
                   <div className="next-step-card">
                     <div>
                       <small>下一步，讓它有你的風格</small>
@@ -1081,6 +1296,35 @@ function App() {
                   )}
                   {front.mode === "logo" && (
                     <>
+                      <div className="section-label small-label">
+                        正中間花色與位置
+                      </div>
+                      <Segmented
+                        label="Logo 是否取代正中間花色"
+                        options={[
+                          {
+                            id: "keep",
+                            label: "保留中間花色",
+                          },
+                          {
+                            id: "replace",
+                            label: "取代正中間花色（占正中央）",
+                          },
+                        ]}
+                        value={front.replaceCenter ? "replace" : "keep"}
+                        onChange={(choiceId) => {
+                          const replaceCenter = choiceId === "replace";
+                          patchFront({ replaceCenter });
+                          if (replaceCenter) {
+                            patchSettings({
+                              logoPosition: "center",
+                              ...(settings.logoSize < 22
+                                ? { logoSize: 24 }
+                                : {}),
+                            });
+                          }
+                        }}
+                      />
                       <UploadZone
                         label="上傳小 LOGO"
                         hint="PNG、JPG 或 SVG · 支援透明底"
@@ -1096,12 +1340,16 @@ function App() {
                             Logo 大小<strong>{settings.logoSize} mm</strong>
                           </span>
                         }
-                        hint="小標記，不會取代啤牌主體。"
+                        hint={
+                          front.replaceCenter
+                            ? "已取代正中間花色並占圖正中央位置，可自由調大。"
+                            : "保留原本中間花色，同時加上 Logo。"
+                        }
                       >
                         <input
                           type="range"
                           min="5"
-                          max="16"
+                          max="45"
                           step="1"
                           value={settings.logoSize}
                           onChange={(event) =>
@@ -1112,18 +1360,23 @@ function App() {
                           aria-label="Logo 大小"
                         />
                       </Field>
-                      <Field label="Logo 位置">
-                        <select
-                          value={settings.logoPosition}
-                          onChange={(event) =>
-                            patchSettings({ logoPosition: event.target.value })
-                          }
-                        >
-                          <option value="bottom-center">下方中央</option>
-                          <option value="top-right">右上方</option>
-                          <option value="bottom-left">左下方</option>
-                        </select>
-                      </Field>
+                      {!front.replaceCenter && (
+                        <Field label="Logo 位置">
+                          <select
+                            value={settings.logoPosition}
+                            onChange={(event) =>
+                              patchSettings({
+                                logoPosition: event.target.value,
+                              })
+                            }
+                          >
+                            <option value="center">正中央（占圖正中央）</option>
+                            <option value="bottom-center">下方中央</option>
+                            <option value="top-right">右上方</option>
+                            <option value="bottom-left">左下方</option>
+                          </select>
+                        </Field>
+                      )}
                       <p className="field-hint">
                         Logo 圖片與大小全副共用；套用範圍決定哪些牌面顯示它。
                       </p>
@@ -1155,6 +1408,31 @@ function App() {
                         value={front.fit}
                         onChange={(fit) => patchFront({ fit })}
                       />
+                      <div className="section-label small-label">
+                        正中間花色顯示
+                      </div>
+                      <Segmented
+                        label="完整圖片是否顯示正中間花色"
+                        options={[
+                          {
+                            id: "hide",
+                            label: "不顯示（不擋圖案）",
+                          },
+                          {
+                            id: "show",
+                            label: "顯示正中間花色（似啤牌）",
+                          },
+                        ]}
+                        value={front.showCenterSuit ? "show" : "hide"}
+                        onChange={(choiceId) =>
+                          patchFront({
+                            showCenterSuit: choiceId === "show",
+                          })
+                        }
+                      />
+                      <p className="field-hint">
+                        整張圖片加入時，想似啤牌可保留正中間花色；不想擋圖案就選不顯示。
+                      </p>
                       <Toggle
                         label="保留白邊"
                         checked={front.frame === "white"}
@@ -1166,12 +1444,71 @@ function App() {
                         label="加上啤牌角標"
                         checked={front.showIndices}
                         onChange={(showIndices) => patchFront({ showIndices })}
-                        hint="圖片已有角標時，保持關閉。"
+                        hint="保留左上及右下點數與花色。"
                       />
                     </>
                   )}
                   {front.mode === "text" && (
                     <>
+                      <div className="section-label small-label">
+                        正中間花色與位置
+                      </div>
+                      <Segmented
+                        label="純文字是否取代或顯示中間花色"
+                        options={[
+                          {
+                            id: "replace",
+                            label: "取代正中間花色",
+                          },
+                          {
+                            id: "show",
+                            label: "顯示中間花色",
+                          },
+                          {
+                            id: "none",
+                            label: "不顯示牌面",
+                          },
+                        ]}
+                        value={
+                          front.replaceCenter
+                            ? "replace"
+                            : front.showCenterSuit
+                              ? "show"
+                              : "none"
+                        }
+                        onChange={(choiceId) =>
+                          patchFront({
+                            replaceCenter: choiceId === "replace",
+                            showCenterSuit: choiceId === "show",
+                            ...(choiceId === "replace"
+                              ? { showIndices: true }
+                              : {}),
+                          })
+                        }
+                      />
+                      <Field
+                        label={
+                          <span className="range-label">
+                            文字大小
+                            <strong>{front.textSize || 130}%</strong>
+                          </span>
+                        }
+                        hint="文字占圖正中央位置，可自由放大或縮小。"
+                      >
+                        <input
+                          type="range"
+                          min="60"
+                          max="220"
+                          step="5"
+                          value={front.textSize || 130}
+                          onChange={(event) =>
+                            patchFront({
+                              textSize: Number(event.target.value),
+                            })
+                          }
+                          aria-label="文字大小"
+                        />
+                      </Field>
                       <Field label="標題">
                         <input
                           value={front.title}
@@ -1184,7 +1521,7 @@ function App() {
                       </Field>
                       <Field
                         label="內容"
-                        hint="自動置中及縮放；建議 150 字以內。"
+                        hint="自動置於正中央及縮放；建議 150 字以內。"
                       >
                         <textarea
                           value={front.body}
@@ -1379,7 +1716,7 @@ function App() {
                   </div>
                   <UploadZone
                     label="上傳完整牌背"
-                    hint="可用 Drive 內的牌底圖案"
+                    hint="PNG、JPG 或 SVG · 全副牌共用"
                     value={
                       settings.back.pattern === "upload"
                         ? settings.back.art
@@ -1484,29 +1821,87 @@ function App() {
                   <Field label="紙張">
                     <select
                       value={settings.print.paper}
-                      onChange={(event) => {
-                        patchPrint({ paper: event.target.value });
-                        setSheetIndex(0);
-                      }}
+                      onChange={(event) => changePaper(event.target.value)}
                     >
                       {Object.entries(PAPERS).map(([id, paper]) => (
                         <option key={id} value={id}>
                           {paper.label}
                           {id === "a4"
                             ? " · 210 × 297 mm"
-                            : ` · ${paper.width} × ${paper.height} mm`}
+                            : id === "r3"
+                              ? " · 預設 2 張卡（63 × 88 mm）"
+                              : ` · ${paper.width} × ${paper.height} mm`}
                         </option>
                       ))}
                     </select>
                   </Field>
-                  {settings.print.paper === "a4" && (
+                  {settings.print.paper === "a4" ? (
                     <>
-                      <div className="section-label">每張紙放幾張牌</div>
+                      <div className="section-label">
+                        1 張 A4 紙印幾張牌
+                        <span>
+                          {plan.layout.cols} × {plan.layout.rows}
+                        </span>
+                      </div>
+                      <div
+                        className="per-sheet-chips"
+                        role="group"
+                        aria-label="A4 每張紙卡牌數量"
+                      >
+                        {A4_CHOICES.map((count) => (
+                          <button
+                            key={count}
+                            type="button"
+                            className={`chip-button ${settings.print.perSheet === count ? "selected" : ""}`}
+                            aria-pressed={settings.print.perSheet === count}
+                            onClick={() => {
+                              patchPrint({ perSheet: count });
+                              setSheetIndex(0);
+                            }}
+                          >
+                            {count} 張
+                          </button>
+                        ))}
+                      </div>
+                      <Field
+                        label="自訂每張 A4 印幾張牌（1–160）"
+                        hint={
+                          plan.layout.cardWidth === 63 &&
+                          plan.layout.cardHeight === 88
+                            ? `保持標準卡牌大小 63 × 88 mm（${plan.layout.cols} × ${plan.layout.rows} 排列）。`
+                            : `自動排版為 ${plan.layout.cols} × ${plan.layout.rows}，每張卡約 ${plan.layout.cardWidth} × ${plan.layout.cardHeight} mm。`
+                        }
+                      >
+                        <input
+                          type="number"
+                          min="1"
+                          max={MAX_CARDS}
+                          aria-label="自訂每張 A4 印幾張牌"
+                          value={settings.print.perSheet}
+                          onChange={(event) => {
+                            const next = clamp(
+                              event.target.value,
+                              1,
+                              MAX_CARDS,
+                              9,
+                            );
+                            patchPrint({ perSheet: Math.round(next) });
+                            setSheetIndex(0);
+                          }}
+                        />
+                      </Field>
+                    </>
+                  ) : (
+                    <>
+                      <div className="section-label">
+                        每張 {settings.print.paper === "r3" ? "3R" : "4R"}{" "}
+                        印幾張牌
+                      </div>
                       <Segmented
-                        label="A4 每張紙卡牌數量"
+                        label="每張相片紙卡牌數量"
                         options={[
-                          { id: 9, label: "9 張 · 3 × 3" },
-                          { id: 6, label: "6 張 · 2 × 3" },
+                          { id: 2, label: "2 張 · 正常卡牌大小" },
+                          { id: 1, label: "1 張 · 單張置中" },
                         ]}
                         value={settings.print.perSheet}
                         onChange={(perSheet) => {
@@ -1515,7 +1910,7 @@ function App() {
                         }}
                       />
                       <p className="field-hint">
-                        兩款排法都保持 63 × 88 mm，不會縮放卡牌。
+                        預設 3R 印 2 張卡，每張 63 × 88 mm（正正是正常卡牌大小）。
                       </p>
                     </>
                   )}
@@ -1549,17 +1944,26 @@ function App() {
                         <small>
                           {" "}
                           張
-                          {settings.print.paper === "a4" ? " A4 紙" : "相片紙"}
+                          {settings.print.paper === "a4"
+                            ? " A4 紙"
+                            : settings.print.paper === "r3"
+                              ? " 3R 相片紙"
+                              : " 4R 相片紙"}
                         </small>
                       </strong>
-                      <span>雙面成品 · {cards.length} 張牌</span>
+                      <span>
+                        每張 {plan.layout.count} 隻 · 共 {cards.length} 張牌
+                      </span>
                     </div>
                     <div>
                       <strong>
                         {plan.pages.length}
                         <small> 頁 PDF</small>
                       </strong>
-                      <span>每張紙 1 正面 + 1 反面</span>
+                      <span>
+                        每卡 {plan.layout.cardWidth} × {plan.layout.cardHeight}{" "}
+                        mm
+                      </span>
                     </div>
                   </div>
                   <div className="print-instructions">
@@ -1690,9 +2094,6 @@ function App() {
                 )}
               </div>
             )}
-            <div className="inspector-footer">
-              <ReferenceLinks />
-            </div>
           </aside>
 
           <section className="studio" aria-label="卡牌預覽及牌組">
@@ -1889,7 +2290,7 @@ function App() {
                           />
                           <span className="card-size-label">
                             {page.side === "front"
-                              ? `${plan.layout.label} · 第 ${page.sheet} 張紙`
+                              ? `${plan.layout.label} · 每張紙 ${plan.layout.count} 張卡`
                               : `${settings.print.flip === "long" ? "左右" : "上下"}對位${page.rotation ? " · 牌背轉 180°" : " · 圖案不鏡像"}`}
                           </span>
                         </div>
@@ -2141,6 +2542,21 @@ function App() {
             </IconButton>
           </div>
         )}
+        <SavedDesignsDialog
+          open={designsOpen}
+          onClose={() => setDesignsOpen(false)}
+          savedDesigns={savedDesigns}
+          activeDesignId={activeDesignId}
+          currentDeckName={settings.deckName}
+          onSaveNew={() => handleSaveToBrowser(true)}
+          onUpdateCurrent={() => handleSaveToBrowser(false)}
+          onLoad={handleLoadFromBrowser}
+          onDelete={handleDeleteFromBrowser}
+          onExportJson={() => {
+            downloadProject(project);
+            notify("設計檔已下載。");
+          }}
+        />
         <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       </div>
       <PrintOutput
@@ -2177,6 +2593,133 @@ function CardActions({ activeCard, cards, onDuplicate, onRemove }) {
     </div>
   );
 }
+
+function SavedDesignsDialog({
+  open,
+  onClose,
+  savedDesigns,
+  activeDesignId,
+  currentDeckName,
+  onSaveNew,
+  onUpdateCurrent,
+  onLoad,
+  onDelete,
+  onExportJson,
+}) {
+  const dialog = useRef(null);
+  useEffect(() => {
+    if (open && !dialog.current.open) dialog.current.showModal();
+    else if (!open && dialog.current.open) dialog.current.close();
+  }, [open]);
+  return (
+    <dialog
+      ref={dialog}
+      className="help-dialog designs-dialog"
+      aria-labelledby="designs-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      onClick={(event) => {
+        if (event.target === dialog.current) onClose();
+      }}
+    >
+      <div className="dialog-heading">
+        <span className="dialog-icon">
+          <FolderHeart size={23} />
+        </span>
+        <IconButton label="關閉我的設計" onClick={onClose}>
+          <X size={19} />
+        </IconButton>
+      </div>
+      <small className="step-eyebrow">BROWSER STORAGE</small>
+      <h2 id="designs-title">瀏覽器已儲存的設計</h2>
+      <p className="dialog-subtitle">
+        將你的不同牌組保存在此瀏覽器中，隨時一鍵載入或切換，無需登入。
+      </p>
+      <div className="dialog-save-actions">
+        <button
+          type="button"
+          className="button primary"
+          onClick={onSaveNew}
+        >
+          <BookmarkPlus size={16} />
+          儲存「{currentDeckName || "我的啤牌"}」為新存檔
+        </button>
+        {activeDesignId && (
+          <button
+            type="button"
+            className="button secondary"
+            onClick={onUpdateCurrent}
+          >
+            <BookmarkCheck size={16} />
+            更新目前存檔
+          </button>
+        )}
+        <button
+          type="button"
+          className="button quiet"
+          onClick={onExportJson}
+        >
+          <ArrowDownToLine size={16} />
+          下載 JSON 備份
+        </button>
+      </div>
+
+      {savedDesigns.length === 0 ? (
+        <div className="empty-designs">
+          <p>目前尚未儲存任何設計版本。按上方按鈕即可將目前設計存入瀏覽器。</p>
+        </div>
+      ) : (
+        <div className="dialog-design-list">
+          {savedDesigns.map((item) => (
+            <div
+              key={item.id}
+              className={`dialog-design-card ${activeDesignId === item.id ? "current" : ""}`}
+            >
+              <div className="dialog-design-preview">
+                <PlayingCard
+                  card={item.project.cards[0]}
+                  settings={item.project.settings}
+                />
+                <PlayingCard
+                  card={item.project.cards[0]}
+                  side="back"
+                  settings={item.project.settings}
+                />
+              </div>
+              <div className="dialog-design-meta">
+                <strong>{item.name}</strong>
+                <span>
+                  {TEMPLATES[item.template]?.label || "自訂卡牌"} ·{" "}
+                  {item.cardCount} 張
+                </span>
+                <small>儲存於 {formatSavedTime(item.updatedAt)}</small>
+              </div>
+              <div className="dialog-design-buttons">
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => onLoad(item)}
+                >
+                  載入此設計
+                </button>
+                <IconButton
+                  label={`刪除 ${item.name}`}
+                  className="danger-icon"
+                  onClick={() => onDelete(item)}
+                >
+                  <Trash2 size={16} />
+                </IconButton>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </dialog>
+  );
+}
+
 function HelpDialog({ open, onClose }) {
   const dialog = useRef(null);
   useEffect(() => {
@@ -2210,27 +2753,29 @@ function HelpDialog({ open, onClose }) {
         <li>
           <span>01</span>
           <div>
-            <strong>選牌組和牌背</strong>
-            <p>52 張、54 張，或者自訂。所有卡牌保持 63 × 88 mm。</p>
+            <strong>選牌組與每張紙印幾張牌</strong>
+            <p>
+              52 張、54 張、UNO 或自訂。可自由選擇 1 張 A4 印幾張牌，或選 3R
+              相片紙（預設 1 張 3R 印 2 張正常大小卡牌）。
+            </p>
           </div>
         </li>
         <li>
           <span>02</span>
           <div>
-            <strong>需要才加圖文</strong>
+            <strong>小 Logo 或純文字可取代正中間花色</strong>
             <p>
-              小 Logo 預設 8
-              mm。完整牌面直接上傳；文字自動排版。整副套用或只改一張都可以。
+              小 Logo 與純文字都可選「取代正中間花色（正中央）」或「保留中間花色」，整副套用或只改一張都可以。
             </p>
           </div>
         </li>
         <li>
           <span>03</span>
           <div>
-            <strong>預覽，再雙面列印</strong>
+            <strong>瀏覽器儲存設計與雙面列印</strong>
             <p>
-              A4 正反頁已逐張配對。列印請選相同的翻頁方式、100%
-              原尺寸，開啟背景圖形並關閉頁首頁尾。先試印一張確認對位。
+              可將多個設計儲存在瀏覽器「我的設計」隨時載入。正反頁已自動配對，列印時選相同翻頁方式及
+              100% 原尺寸即可。
             </p>
           </div>
         </li>
@@ -2238,7 +2783,7 @@ function HelpDialog({ open, onClose }) {
       <div className="help-storage">
         <ShieldCheck size={18} />
         <p>
-          設計與圖片只使用此瀏覽器儲存，不會上傳到伺服器。換裝置或清除瀏覽器資料前，請用「儲存設計」下載
+          設計與圖片只使用此瀏覽器儲存，不會上傳到伺服器。換裝置或清除瀏覽器資料前，亦可用「儲存設計」下載
           JSON 備份。
         </p>
       </div>
